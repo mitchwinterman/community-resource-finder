@@ -1,0 +1,107 @@
+/* BASIC RESET */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+    background: linear-gradient(135deg, #e8eef8, #fafcff);
+    padding: 40px;
+    color: #333;
+}
+
+/* MAIN CARD */
+.wrapper {
+    max-width: 1100px;
+    margin: auto;
+    background: white;
+    padding: 40px 50px;
+    border-radius: 18px;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+}
+
+/* HEADERS */
+h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.subtitle {
+    font-size: 15px;
+    margin-bottom: 30px;
+    color: #555;
+}
+
+/* INPUT + FILTERS */
+.search-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.search-box {
+    flex: 1;
+}
+
+input[type="text"] {
+    width: 100%;
+    padding: 14px 16px;
+    font-size: 16px;
+    border-radius: 10px;
+    border: 1px solid #ccc;
+    transition: 0.2s;
+}
+
+input[type="text"]:focus {
+    border-color: #6a7cff;
+    outline: none;
+    box-shadow: 0 0 4px rgba(106, 124, 255, 0.4);
+}
+
+select {
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+    background: white;
+}
+
+/* RESULTS LIST */
+.results-panel {
+    margin-top: 20px;
+}
+
+.result-card {
+    padding: 16px 20px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    background: #f7f9ff;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.result-card:hover {
+    background: #eef2ff;
+}
+
+/* DETAILS PANEL */
+.details-panel {
+    margin-top: 30px;
+    padding: 25px;
+    border-radius: 14px;
+    background: #f4f8ff;
+    min-height: 200px;
+}
+
+.details-title {
+    font-weight: 600;
+    font-size: 20px;
+    margin-bottom: 8px;
+}
+
+.details-field {
+    margin-bottom: 6px;
+}
