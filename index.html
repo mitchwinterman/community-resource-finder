@@ -36,16 +36,33 @@
 
             <!-- Subcategory dropdown -->
             <div>
-                <select id="subcategorySelect">
+                <select id="subcategorySelect" disabled>
                     <option value="all">All subcategories</option>
                 </select>
             </div>
 
         </div>
 
-        <!-- Results list -->
-<div id="results"
+        <!-- NEW MASTER-DETAIL LAYOUT -->
+        <div class="content-split">
+
+            <!-- Results list -->
+            <div id="results" class="results-panel">
+                Loading…
+            </div>
+
+            <!-- Details panel -->
+            <div id="details" class="details-panel">
+                <div style="text-align:center; color:#666;">
+                    Select a resource<br>
+                    <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>
-
