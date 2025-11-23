@@ -30,9 +30,10 @@ async function loadCategories() {
 const searchInput = document.getElementById("searchBox");
 const categorySelect = document.getElementById("categorySelect");
 const subcategorySelect = document.getElementById("subcategorySelect");
+const resetButton = document.getElementById("resetButton");
+
 const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
-const resetButton = document.getElementById("resetButton");
 
 // -----------------------------
 // ERROR HANDLER
@@ -97,11 +98,11 @@ function renderDetails(item) {
 }
 
 // -----------------------------
-// HELPER FUNCTIONS
+// HELPERS
 // -----------------------------
 function buildHaystack(item) {
     const copy = { ...item };
-    delete copy.UpdatedBy;
+    delete copy.UpdatedBy; // not searchable
 
     return Object.values(copy)
         .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
@@ -127,8 +128,8 @@ function applyFilters() {
     }
 
     const keyword = (searchInput.value || "").trim().toLowerCase();
-    const selectedCategory = (categorySelect.value || "all").trim().toLowerCase();
-    const selectedSub = (subcategorySelect.value || "all").trim().toLowerCase();
+    const selectedCategory = categorySelect.value;
+    const selectedSub = subcategorySelect.value;
 
     const filtered = globalData.filter(item => {
         const itemCats = parseCsvField(item.Categories).map(c => c.toLowerCase());
@@ -177,8 +178,8 @@ function populateCategoryFilter() {
 function populateSubcategoryFilterForCategory(category) {
     resetSubcategoryFilter();
 
-    const trueKey = category.toLowerCase();
-    const subs = categoryMap[trueKey] || [];
+    const key = category.toLowerCase();
+    const subs = categoryMap[key] || [];
 
     subs.forEach(sub => {
         const opt = document.createElement("option");
@@ -225,7 +226,6 @@ async function init() {
     const [data, cats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
-    // Normalize category keys
     const normalized = {};
     for (const key in cats) {
         normalized[key.toLowerCase()] = cats[key];
