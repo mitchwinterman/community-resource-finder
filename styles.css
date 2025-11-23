@@ -105,3 +105,55 @@ select {
 .details-field {
     margin-bottom: 6px;
 }
+/* Master-detail layout container */
+.content-split {
+    display: flex;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+/* Left panel: Scrollable list */
+.results-panel {
+    width: 45%;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding-right: 10px;
+}
+
+/* Right panel: Details */
+.details-panel {
+    flex-grow: 1;
+    min-height: 80vh;
+    background: #f7f9fc;
+    border-radius: 12px;
+    padding: 20px;
+    overflow-y: auto;
+    box-shadow: inset 0 0 6px rgba(0,0,0,0.05);
+}
+
+/* Cards fill width cleanly */
+.result-card {
+    cursor: pointer;
+    transition: background 0.15s ease-in-out;
+}
+
+.result-card:hover {
+    background: #eef3ff;
+}
+
+/* MOBILE LAYOUT (phone screens) */
+@media (max-width: 900px) {
+    .content-split {
+        flex-direction: column;
+    }
+
+    .results-panel {
+        width: 100%;
+        max-height: none;
+    }
+
+    .details-panel {
+        width: 100%;
+        min-height: auto;
+    }
+}
