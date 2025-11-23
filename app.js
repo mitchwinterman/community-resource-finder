@@ -159,7 +159,7 @@ function applyFilters() {
 // -----------------------------
 function resetSubcategoryFilter() {
     subcategorySelect.innerHTML = `<option value="all">All subcategories</option>`;
-    subcategorySelect.disabled = true;
+    subcategorySelect.disabled = false;
 }
 
 function populateCategoryFilter() {
