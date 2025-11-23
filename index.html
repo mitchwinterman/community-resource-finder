@@ -1,1 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Community Resource Finder</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+    <div class="wrapper">
+
+        <h1>Community Resource Finder</h1>
+        <div class="subtitle">
+            Browse, search, and filter resources from the Downtown Reno Library community list.
+        </div>
+
+        <!-- SEARCH + FILTERS -->
+        <div class="search-row">
+
+            <!-- Search box -->
+            <div class="search-box">
+                <input 
+                    type="text" 
+                    id="searchBox" 
+                    placeholder="Search by name, service, keyword, or location..."
+                >
+            </div>
+
+            <!-- Category dropdown -->
+            <div>
+                <select id="categorySelect">
+                    <option value="all">All categories</option>
+                </select>
+            </div>
+
+            <!-- Subcategory dropdown -->
+            <div>
+                <select id="subcategorySelect">
+                    <option value="all">All subcategories</option>
+                </select>
+            </div>
+
+        </div>
+
+        <!-- Results list -->
+        <div id="results" class="results-panel">
+            Loading…
+        </div>
+
+        <!-- Details panel -->
+        <div id="details" class="details-panel">
+            <div style="text-align:center; color:#666;">
+                Select a resource<br>
+                <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
 
