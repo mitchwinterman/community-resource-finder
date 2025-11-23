@@ -32,6 +32,7 @@ const categorySelect = document.getElementById("categorySelect");
 const subcategorySelect = document.getElementById("subcategorySelect");
 const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
+const resetButton = document.getElementById("resetButton");
 
 // -----------------------------
 // ERROR HANDLER
@@ -167,7 +168,7 @@ function populateCategoryFilter() {
     const cats = Object.keys(categoryMap).sort();
     cats.forEach(cat => {
         const opt = document.createElement("option");
-        opt.value = cat.toLowerCase();   // normalized
+        opt.value = cat.toLowerCase();
         opt.textContent = cat;
         categorySelect.appendChild(opt);
     });
@@ -176,22 +177,37 @@ function populateCategoryFilter() {
 function populateSubcategoryFilterForCategory(category) {
     resetSubcategoryFilter();
 
-    if (!category || category === "all") return;
+    const trueKey = category.toLowerCase();
+    const subs = categoryMap[trueKey] || [];
 
-    const subs = categoryMap[category] || [];
-    if (subs.length === 0) return;
+    subs.forEach(sub => {
+        const opt = document.createElement("option");
+        opt.value = sub.toLowerCase();
+        opt.textContent = sub;
+        subcategorySelect.appendChild(opt);
+    });
 
-    subs
-        .slice()
-        .sort()
-        .forEach(sub => {
-            const opt = document.createElement("option");
-            opt.value = sub.toLowerCase();
-            opt.textContent = sub;
-            subcategorySelect.appendChild(opt);
-        });
+    if (subs.length > 0) {
+        subcategorySelect.disabled = false;
+    }
+}
 
-    subcategorySelect.disabled = false;
+// -----------------------------
+// RESET BUTTON
+// -----------------------------
+function resetAll() {
+    searchInput.value = "";
+    categorySelect.value = "all";
+    resetSubcategoryFilter();
+
+    detailsDiv.innerHTML = `
+        <div style="text-align:center; color:#666;">
+            Select a resource<br>
+            <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
+        </div>
+    `;
+
+    applyFilters();
 }
 
 // -----------------------------
@@ -209,7 +225,7 @@ async function init() {
     const [data, cats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
-    // Normalize categoryMap keys to lowercase
+    // Normalize category keys
     const normalized = {};
     for (const key in cats) {
         normalized[key.toLowerCase()] = cats[key];
@@ -224,14 +240,16 @@ async function init() {
 // -----------------------------
 // EVENT LISTENERS
 // -----------------------------
-searchInput.addEventListener("input", () => applyFilters());
+searchInput.addEventListener("input", applyFilters);
 
 categorySelect.addEventListener("change", () => {
     populateSubcategoryFilterForCategory(categorySelect.value);
     applyFilters();
 });
 
-subcategorySelect.addEventListener("change", () => applyFilters());
+subcategorySelect.addEventListener("change", applyFilters);
+
+resetButton.addEventListener("click", resetAll);
 
 // -----------------------------
 // Start app
