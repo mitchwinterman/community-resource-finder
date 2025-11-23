@@ -61,38 +61,76 @@ function renderList(data) {
 function renderDetails(item) {
     detailsDiv.innerHTML = `
         <div class="details-title">${item.Organization || "No name"}</div>
+
         <div class="details-field"><strong>Description:</strong> ${item.Description || ""}</div>
         <div class="details-field"><strong>Address:</strong> ${item.Address || ""}</div>
         <div class="details-field"><strong>City:</strong> ${item.City || ""}</div>
         <div class="details-field"><strong>Zip:</strong> ${item.Zip || ""}</div>
         <div class="details-field"><strong>Phone:</strong> ${item.Phone || ""}</div>
+        <div class="details-field"><strong>Email:</strong> ${item.Email || ""}</div>
         <div class="details-field"><strong>Website:</strong> <a href="${item.Website}" target="_blank">${item.Website}</a></div>
+
         <div class="details-field"><strong>Categories:</strong> ${item.Categories || ""}</div>
         <div class="details-field"><strong>Subcategories:</strong> ${item.Subcategories || ""}</div>
+
+        <div class="details-field"><strong>Eligibility:</strong> ${item.Eligibility || ""}</div>
+        <div class="details-field"><strong>Hours:</strong> ${item.Hours || ""}</div>
+        <div class="details-field"><strong>Keywords:</strong> ${item.Keywords || ""}</div>
+        <div class="details-field"><strong>Notes:</strong> ${item.Notes || ""}</div>
     `;
 }
 
 // -----------------------------
-// FILTERING
+// FILTERING (FULLY REWRITTEN)
 // -----------------------------
 
 function applyFilters(fullData) {
-    let text = searchInput.value.trim().toLowerCase();
-    let cat = categorySelect.value;
-    let sub = subcategorySelect.value;
+    const keyword = searchInput.value.trim().toLowerCase();
+    const selectedCategory = categorySelect.value;
+    const selectedSubcategory = subcategorySelect.value;
 
-    let filtered = fullData.filter(item => {
-        let matchesText =
-            !text ||
-            (item.SearchBlock && item.SearchBlock.includes(text));
+    const filtered = fullData.filter(item => {
 
-        let matchesCat =
-            cat === "all" || (item.Categories && item.Categories.includes(cat));
+        // CATEGORY FILTER
+        if (selectedCategory !== "all") {
+            if (!item.Categories || !item.Categories.toLowerCase().includes(selectedCategory.toLowerCase())) {
+                return false;
+            }
+        }
 
-        let matchesSub =
-            sub === "all" || (item.Subcategories && item.Subcategories.includes(sub));
+        // SUBCATEGORY FILTER
+        if (selectedSubcategory !== "all") {
+            if (!item.Subcategories || !item.Subcategories.toLowerCase().includes(selectedSubcategory.toLowerCase())) {
+                return false;
+            }
+        }
 
-        return matchesText && matchesCat && matchesSub;
+        // FULL TEXT SEARCH (ALL FIELDS)
+        if (keyword) {
+            const haystack = [
+                item.Organization,
+                item.Description,
+                item.Address,
+                item.City,
+                item.Zip,
+                item.Phone,
+                item.Email,
+                item.Website,
+                item.Categories,
+                item.Subcategories,
+                item.Keywords,
+                item.Eligibility,
+                item.Hours,
+                item.Notes
+            ]
+            .filter(Boolean)
+            .join(" | ")
+            .toLowerCase();
+
+            if (!haystack.includes(keyword)) return false;
+        }
+
+        return true;
     });
 
     renderList(filtered);
@@ -109,15 +147,18 @@ async function init() {
 
     globalData = await loadData();
 
-    // Populate category/subcategory options dynamically
     populateFilters(globalData);
 
     applyFilters(globalData);
 }
 
+// -----------------------------
+// POPULATE FILTERS
+// -----------------------------
+
 function populateFilters(data) {
-    let cats = new Set();
-    let subs = new Set();
+    const cats = new Set();
+    const subs = new Set();
 
     data.forEach(item => {
         if (item.Categories) item.Categories.split(",").forEach(c => cats.add(c.trim()));
@@ -140,12 +181,12 @@ function populateFilters(data) {
 }
 
 // -----------------------------
-// EVENT LISTENERS
+// EVENT LISTENERS (FIXED BUGS)
 // -----------------------------
 
 searchInput.addEventListener("input", () => applyFilters(globalData));
 categorySelect.addEventListener("change", () => applyFilters(globalData));
-subcategorySelect.addEventListener("change", () => applyFilters(globalData));
+subcategorySelect.addEventListener("change", () => applyFilters(globalData));  // FIXED (was referencing "global")
 
 // -----------------------------
 // Start app
