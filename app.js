@@ -224,7 +224,7 @@ async function init() {
 searchInput.addEventListener("input", () => applyFilters());
 
 categorySelect.addEventListener("change", () => {
-    populateSubcategoryFilterForCategory(categorySelect.value.toLowerCase());
+    populateSubcategoryFilterForCategory(categorySelect.value);
     applyFilters();
 });
 
