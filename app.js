@@ -26,7 +26,7 @@ const detailsDiv = document.getElementById("details");
 // ERROR HANDLER
 // -----------------------------
 function showError(message) {
-    resultsDiv.innerHTML = `<div class='result-card'>${message}</div>`;
+    resultsDiv.innerHTML = `<div class="result-card">${message}</div>`;
 }
 
 // -----------------------------
@@ -35,19 +35,18 @@ function showError(message) {
 function renderList(data) {
     resultsDiv.innerHTML = "";
 
-    if (data.length === 0) {
-        resultsDiv.innerHTML = "<div class='result-card'>No results found.</div>";
+    if (!data || data.length === 0) {
+        resultsDiv.innerHTML = `<div class="result-card">No results found.</div>`;
         return;
     }
 
     data.forEach(item => {
-        let card = document.createElement("div");
+        const card = document.createElement("div");
         card.className = "result-card";
         card.innerHTML = `
             <div><strong>${item.Organization || "No name"}</strong></div>
             <div>${item.Description || ""}</div>
         `;
-
         card.onclick = () => renderDetails(item);
         resultsDiv.appendChild(card);
     });
@@ -58,89 +57,89 @@ function renderDetails(item) {
         <div class="details-title">${item.Organization || "No name"}</div>
 
         <div class="details-field"><strong>Description:</strong> ${item.Description || ""}</div>
-        <div class="details-field"><strong<Address:</strong> ${item.Address || ""}</div>
+        <div class="details-field"><strong>Address:</strong> ${item.Address || ""}</div>
         <div class="details-field"><strong>City:</strong> ${item.City || ""}</div>
         <div class="details-field"><strong>Zip:</strong> ${item.Zip || ""}</div>
         <div class="details-field"><strong>Phone:</strong> ${item.Phone || ""}</div>
         <div class="details-field"><strong>Email:</strong> ${item.Email || ""}</div>
-        <div class="details-field"><strong>Website:</strong> <a href="${item.Website}" target="_blank">${item.Website}</a></div>
+        <div class="details-field"><strong>Website:</strong> ${
+            item.Website
+                ? `<a href="${item.Website.startsWith("http") ? item.Website : "https://" + item.Website}" target="_blank" rel="noopener noreferrer">${item.Website}</a>`
+                : ""
+        }</div>
 
-        <div class="details-field"><strong>Categories:</strong> ${arrayToString(item.Categories)}</div>
-        <div class="details-field"><strong>Subcategories:</strong> ${arrayToString(item.Subcategories)}</div>
+        <div class="details-field"><strong>Categories:</strong> ${item.Categories || ""}</div>
+        <div class="details-field"><strong>Subcategories:</strong> ${item.Subcategories || ""}</div>
 
         <div class="details-field"><strong>Eligibility:</strong> ${item.Eligibility || ""}</div>
         <div class="details-field"><strong>Hours:</strong> ${item.Hours || ""}</div>
-        <div class="details-field"><strong>Keywords:</strong> ${arrayToString(item.Keywords)}</div>
+        <div class="details-field"><strong>Keywords:</strong> ${item.Keywords || ""}</div>
         <div class="details-field"><strong>Notes:</strong> ${item.Notes || ""}</div>
     `;
 }
 
 // -----------------------------
-// HELPERS
+// HELPER FUNCTIONS
 // -----------------------------
-function normalize(value) {
-    if (!value) return [];
-    if (Array.isArray(value)) return value.map(v => String(v).trim().toLowerCase());
-    return String(value)
-        .split(",")
-        .map(v => v.trim().toLowerCase());
-}
-
-function arrayToString(value) {
-    if (!value) return "";
-    if (Array.isArray(value)) return value.join(", ");
-    return value;
-}
-
 function buildHaystack(item) {
-    return [
-        item.Organization,
-        item.Description,
-        item.Address,
-        item.City,
-        item.Zip,
-        item.Phone,
-        item.Email,
-        item.Website,
-        arrayToString(item.Categories),
-        arrayToString(item.Subcategories),
-        item.Eligibility,
-        item.Hours,
-        arrayToString(item.Keywords),
-        item.Notes
-    ]
-    .filter(Boolean)
-    .join(" | ")
-    .toLowerCase();
+    // concatenate all field values for full-text search
+    return Object.values(item || {})
+        .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
+        .join(" | ")
+        .toLowerCase();
+}
+
+function addTokensToSet(csv, set) {
+    if (!csv) return;
+    String(csv)
+        .split(",")
+        .map(p => p.trim())
+        .filter(p => p.length > 0)
+        .forEach(p => set.add(p));
 }
 
 // -----------------------------
-// FILTERING (FULLY FIXED)
+// FILTERING
 // -----------------------------
 function applyFilters(fullData) {
-    const keyword = searchInput.value.trim().toLowerCase();
-    const selectedCategory = categorySelect.value.toLowerCase();
-    const selectedSubcategory = subcategorySelect.value.toLowerCase();
+    if (!Array.isArray(fullData)) {
+        renderList([]);
+        return;
+    }
+
+    const keywordRaw = (searchInput.value || "").trim().toLowerCase();
+
+    // guard against blank values on the selects
+    const rawCat = (categorySelect.value || "").trim();
+    const rawSub = (subcategorySelect.value || "").trim();
+
+    const selectedCategory =
+        rawCat === "" ? "all" : rawCat.toLowerCase();
+    const selectedSubcategory =
+        rawSub === "" ? "all" : rawSub.toLowerCase();
 
     const filtered = fullData.filter(item => {
-
-        const itemCats = normalize(item.Categories);
-        const itemSubs = normalize(item.Subcategories);
+        const catText = String(item.Categories || "").toLowerCase();
+        const subText = String(item.Subcategories || "").toLowerCase();
 
         // CATEGORY FILTER
-        if (selectedCategory !== "all" && !itemCats.includes(selectedCategory)) {
+        if (selectedCategory !== "all" &&
+            !catText.includes(selectedCategory)) {
             return false;
         }
 
         // SUBCATEGORY FILTER
-        if (selectedSubcategory !== "all" && !itemSubs.includes(selectedSubcategory)) {
+        if (selectedSubcategory !== "all" &&
+            !subText.includes(selectedSubcategory)) {
             return false;
         }
 
-        // FULL TEXT SEARCH
-        if (keyword) {
+        // FULL-TEXT SEARCH
+        if (keywordRaw) {
             const haystack = buildHaystack(item);
-            if (!haystack.includes(keyword)) return false;
+            if (!haystack.includes(keywordRaw)) {
+                return false;
+            }
         }
 
         return true;
@@ -155,44 +154,41 @@ function applyFilters(fullData) {
 let globalData = [];
 
 async function init() {
-    resultsDiv.innerHTML = "<div class='result-card'>Loading…</div>";
+    resultsDiv.innerHTML = `<div class="result-card">Loading…</div>`;
 
     globalData = await loadData();
 
     populateFilters(globalData);
-
     applyFilters(globalData);
 }
 
 // -----------------------------
-// POPULATE FILTERS (ARRAY SAFE)
+// POPULATE FILTERS
 // -----------------------------
 function populateFilters(data) {
-    const cats = new Set();
-    const subs = new Set();
+    const catSet = new Set();
+    const subSet = new Set();
 
     data.forEach(item => {
-        normalize(item.Categories).forEach(c => cats.add(c));
-        normalize(item.Subcategories).forEach(s => subs.add(s));
+        addTokensToSet(item.Categories, catSet);
+        addTokensToSet(item.Subcategories, subSet);
     });
 
-    cats.forEach(c => {
-        let opt = document.createElement("option");
-        opt.value = c;
-        opt.textContent = capitalize(c);
+    // categories
+    catSet.forEach(cat => {
+        const opt = document.createElement("option");
+        opt.value = cat;           // keep original text as value
+        opt.textContent = cat;     // show as-is
         categorySelect.appendChild(opt);
     });
 
-    subs.forEach(s => {
-        let opt = document.createElement("option");
-        opt.value = s;
-        opt.textContent = capitalize(s);
+    // subcategories
+    subSet.forEach(sub => {
+        const opt = document.createElement("option");
+        opt.value = sub;
+        opt.textContent = sub;
         subcategorySelect.appendChild(opt);
     });
-}
-
-function capitalize(str) {
-    return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 // -----------------------------
