@@ -1,5 +1,5 @@
 // -----------------------------
-// Temporary data loader
+// Data loaders
 // -----------------------------
 async function loadData() {
     try {
@@ -10,6 +10,17 @@ async function loadData() {
         console.error("DATA LOAD ERROR:", err);
         showError("Error loading resources.");
         return [];
+    }
+}
+
+async function loadCategories() {
+    try {
+        const response = await fetch("categories.json");
+        if (!response.ok) throw new Error("Bad response for categories");
+        return await response.json();
+    } catch (err) {
+        console.error("CATEGORY LOAD ERROR:", err);
+        return {};
     }
 }
 
@@ -53,6 +64,11 @@ function renderList(data) {
 }
 
 function renderDetails(item) {
+    const website = item.Website ? String(item.Website).trim() : "";
+    const websiteHref = website
+        ? (website.startsWith("http") ? website : "https://" + website)
+        : "";
+
     detailsDiv.innerHTML = `
         <div class="details-title">${item.Organization || "No name"}</div>
 
@@ -63,9 +79,7 @@ function renderDetails(item) {
         <div class="details-field"><strong>Phone:</strong> ${item.Phone || ""}</div>
         <div class="details-field"><strong>Email:</strong> ${item.Email || ""}</div>
         <div class="details-field"><strong>Website:</strong> ${
-            item.Website
-                ? `<a href="${item.Website.startsWith("http") ? item.Website : "https://" + item.Website}" target="_blank" rel="noopener noreferrer">${item.Website}</a>`
-                : ""
+            websiteHref ? `<a href="${websiteHref}" target="_blank" rel="noopener noreferrer">${website}</a>` : ""
         }</div>
 
         <div class="details-field"><strong>Categories:</strong> ${item.Categories || ""}</div>
@@ -73,6 +87,8 @@ function renderDetails(item) {
 
         <div class="details-field"><strong>Eligibility:</strong> ${item.Eligibility || ""}</div>
         <div class="details-field"><strong>Hours:</strong> ${item.Hours || ""}</div>
+        <div class="details-field"><strong>Cost:</strong> ${item.Cost || ""}</div>
+        <div class="details-field"><strong>Last Verified:</strong> ${item["Last Verified"] || ""}</div>
         <div class="details-field"><strong>Keywords:</strong> ${item.Keywords || ""}</div>
         <div class="details-field"><strong>Notes:</strong> ${item.Notes || ""}</div>
     `;
@@ -82,62 +98,60 @@ function renderDetails(item) {
 // HELPER FUNCTIONS
 // -----------------------------
 function buildHaystack(item) {
-    // concatenate all field values for full-text search
-    return Object.values(item || {})
+    const copy = { ...item };
+    delete copy.UpdatedBy; // never searchable/displayed
+
+    return Object.values(copy || {})
         .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
         .join(" | ")
         .toLowerCase();
 }
 
-function addTokensToSet(csv, set) {
-    if (!csv) return;
-    String(csv)
+function parseCsvField(value) {
+    if (!value) return [];
+    return String(value)
         .split(",")
-        .map(p => p.trim())
-        .filter(p => p.length > 0)
-        .forEach(p => set.add(p));
+        .map(v => v.trim())
+        .filter(v => v.length > 0);
 }
 
 // -----------------------------
 // FILTERING
 // -----------------------------
-function applyFilters(fullData) {
-    if (!Array.isArray(fullData)) {
+function applyFilters() {
+    if (!Array.isArray(globalData)) {
         renderList([]);
         return;
     }
 
-    const keywordRaw = (searchInput.value || "").trim().toLowerCase();
+    const keyword = (searchInput.value || "").trim().toLowerCase();
+    const selectedCategory = (categorySelect.value || "all").trim();
+    const selectedSub = (subcategorySelect.value || "all").trim();
 
-    // guard against blank values on the selects
-    const rawCat = (categorySelect.value || "").trim();
-    const rawSub = (subcategorySelect.value || "").trim();
-
-    const selectedCategory =
-        rawCat === "" ? "all" : rawCat.toLowerCase();
-    const selectedSubcategory =
-        rawSub === "" ? "all" : rawSub.toLowerCase();
-
-    const filtered = fullData.filter(item => {
-        const catText = String(item.Categories || "").toLowerCase();
-        const subText = String(item.Subcategories || "").toLowerCase();
+    const filtered = globalData.filter(item => {
+        const itemCatsRaw = parseCsvField(item.Categories).map(c => c.toLowerCase());
+        const itemSubsRaw = parseCsvField(item.Subcategories).map(s => s.toLowerCase());
 
         // CATEGORY FILTER
-        if (selectedCategory !== "all" &&
-            !catText.includes(selectedCategory)) {
-            return false;
+        if (selectedCategory !== "all") {
+            const catLower = selectedCategory.toLowerCase();
+            if (!itemCatsRaw.includes(catLower)) {
+                return false;
+            }
         }
 
         // SUBCATEGORY FILTER
-        if (selectedSubcategory !== "all" &&
-            !subText.includes(selectedSubcategory)) {
-            return false;
+        if (selectedSub !== "all") {
+            const subLower = selectedSub.toLowerCase();
+            if (!itemSubsRaw.includes(subLower)) {
+                return false;
+            }
         }
 
-        // FULL-TEXT SEARCH
-        if (keywordRaw) {
+        // FULL TEXT SEARCH
+        if (keyword) {
             const haystack = buildHaystack(item);
-            if (!haystack.includes(keywordRaw)) {
+            if (!haystack.includes(keyword)) {
                 return false;
             }
         }
@@ -149,54 +163,92 @@ function applyFilters(fullData) {
 }
 
 // -----------------------------
-// INITIAL LOAD
+// FILTER POPULATION
 // -----------------------------
-let globalData = [];
+function resetSubcategoryFilter() {
+    subcategorySelect.innerHTML = "";
+    const optAll = document.createElement("option");
+    optAll.value = "all";
+    optAll.textContent = "All subcategories";
+    subcategorySelect.appendChild(optAll);
+    subcategorySelect.disabled = true;
+}
 
-async function init() {
-    resultsDiv.innerHTML = `<div class="result-card">Loading…</div>`;
+function populateCategoryFilter() {
+    // Keep existing "All categories" at index 0, clear others
+    while (categorySelect.options.length > 1) {
+        categorySelect.remove(1);
+    }
 
-    globalData = await loadData();
+    const cats = Object.keys(categoryMap || {}).sort();
+    cats.forEach(cat => {
+        const opt = document.createElement("option");
+        opt.value = cat;
+        opt.textContent = cat;
+        categorySelect.appendChild(opt);
+    });
+}
 
-    populateFilters(globalData);
-    applyFilters(globalData);
+function populateSubcategoryFilterForCategory(category) {
+    resetSubcategoryFilter();
+
+    if (!category || category === "all") {
+        return;
+    }
+
+    const subs = categoryMap[category] || [];
+    if (subs.length === 0) {
+        return;
+    }
+
+    subcategorySelect.disabled = true; // will enable after options added
+
+    subs
+        .slice()
+        .sort((a, b) => a.localeCompare(b))
+        .forEach(sub => {
+            const opt = document.createElement("option");
+            opt.value = sub;
+            opt.textContent = sub;
+            subcategorySelect.appendChild(opt);
+        });
+
+    subcategorySelect.disabled = false;
 }
 
 // -----------------------------
-// POPULATE FILTERS
+// GLOBAL STATE
 // -----------------------------
-function populateFilters(data) {
-    const catSet = new Set();
-    const subSet = new Set();
+let globalData = [];
+let categoryMap = {};
 
-    data.forEach(item => {
-        addTokensToSet(item.Categories, catSet);
-        addTokensToSet(item.Subcategories, subSet);
-    });
+// -----------------------------
+// INITIAL LOAD
+// -----------------------------
+async function init() {
+    resultsDiv.innerHTML = `<div class="result-card">Loading…</div>`;
 
-    // categories
-    catSet.forEach(cat => {
-        const opt = document.createElement("option");
-        opt.value = cat;           // keep original text as value
-        opt.textContent = cat;     // show as-is
-        categorySelect.appendChild(opt);
-    });
+    const [data, cats] = await Promise.all([loadData(), loadCategories()]);
+    globalData = Array.isArray(data) ? data : [];
+    categoryMap = cats || {};
 
-    // subcategories
-    subSet.forEach(sub => {
-        const opt = document.createElement("option");
-        opt.value = sub;
-        opt.textContent = sub;
-        subcategorySelect.appendChild(opt);
-    });
+    populateCategoryFilter();
+    resetSubcategoryFilter();
+    applyFilters();
 }
 
 // -----------------------------
 // EVENT LISTENERS
 // -----------------------------
-searchInput.addEventListener("input", () => applyFilters(globalData));
-categorySelect.addEventListener("change", () => applyFilters(globalData));
-subcategorySelect.addEventListener("change", () => applyFilters(globalData));
+searchInput.addEventListener("input", () => applyFilters());
+
+categorySelect.addEventListener("change", () => {
+    const selectedCategory = categorySelect.value;
+    populateSubcategoryFilterForCategory(selectedCategory);
+    applyFilters();
+});
+
+subcategorySelect.addEventListener("change", () => applyFilters());
 
 // -----------------------------
 // Start app
