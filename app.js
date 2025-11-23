@@ -133,17 +133,14 @@ function applyFilters() {
         const itemCats = parseCsvField(item.Categories).map(c => c.toLowerCase());
         const itemSubs = parseCsvField(item.Subcategories).map(s => s.toLowerCase());
 
-        // CATEGORY FILTER
         if (selectedCategory !== "all" && !itemCats.includes(selectedCategory)) {
             return false;
         }
 
-        // SUBCATEGORY FILTER
         if (selectedSub !== "all" && !itemSubs.includes(selectedSub)) {
             return false;
         }
 
-        // FULL TEXT SEARCH
         if (keyword && !buildHaystack(item).includes(keyword)) {
             return false;
         }
@@ -159,7 +156,7 @@ function applyFilters() {
 // -----------------------------
 function resetSubcategoryFilter() {
     subcategorySelect.innerHTML = `<option value="all">All subcategories</option>`;
-    subcategorySelect.disabled = false;
+    subcategorySelect.disabled = true;
 }
 
 function populateCategoryFilter() {
@@ -170,7 +167,7 @@ function populateCategoryFilter() {
     const cats = Object.keys(categoryMap).sort();
     cats.forEach(cat => {
         const opt = document.createElement("option");
-        opt.value = cat;
+        opt.value = cat.toLowerCase();   // normalized
         opt.textContent = cat;
         categorySelect.appendChild(opt);
     });
@@ -189,7 +186,7 @@ function populateSubcategoryFilterForCategory(category) {
         .sort()
         .forEach(sub => {
             const opt = document.createElement("option");
-            opt.value = sub;
+            opt.value = sub.toLowerCase();
             opt.textContent = sub;
             subcategorySelect.appendChild(opt);
         });
@@ -211,7 +208,13 @@ async function init() {
 
     const [data, cats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
-    categoryMap = cats || {};
+
+    // Normalize categoryMap keys to lowercase
+    const normalized = {};
+    for (const key in cats) {
+        normalized[key.toLowerCase()] = cats[key];
+    }
+    categoryMap = normalized;
 
     populateCategoryFilter();
     resetSubcategoryFilter();
