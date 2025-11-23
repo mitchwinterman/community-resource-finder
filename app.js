@@ -78,6 +78,7 @@ function renderDetails(item) {
         <div class="details-field"><strong>Zip:</strong> ${item.Zip || ""}</div>
         <div class="details-field"><strong>Phone:</strong> ${item.Phone || ""}</div>
         <div class="details-field"><strong>Email:</strong> ${item.Email || ""}</div>
+
         <div class="details-field"><strong>Website:</strong> ${
             websiteHref ? `<a href="${websiteHref}" target="_blank" rel="noopener noreferrer">${website}</a>` : ""
         }</div>
@@ -99,9 +100,9 @@ function renderDetails(item) {
 // -----------------------------
 function buildHaystack(item) {
     const copy = { ...item };
-    delete copy.UpdatedBy; // never searchable/displayed
+    delete copy.UpdatedBy;
 
-    return Object.values(copy || {})
+    return Object.values(copy)
         .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
         .join(" | ")
         .toLowerCase();
@@ -125,35 +126,26 @@ function applyFilters() {
     }
 
     const keyword = (searchInput.value || "").trim().toLowerCase();
-    const selectedCategory = (categorySelect.value || "all").trim();
-    const selectedSub = (subcategorySelect.value || "all").trim();
+    const selectedCategory = (categorySelect.value || "all").trim().toLowerCase();
+    const selectedSub = (subcategorySelect.value || "all").trim().toLowerCase();
 
     const filtered = globalData.filter(item => {
-        const itemCatsRaw = parseCsvField(item.Categories).map(c => c.toLowerCase());
-        const itemSubsRaw = parseCsvField(item.Subcategories).map(s => s.toLowerCase());
+        const itemCats = parseCsvField(item.Categories).map(c => c.toLowerCase());
+        const itemSubs = parseCsvField(item.Subcategories).map(s => s.toLowerCase());
 
         // CATEGORY FILTER
-        if (selectedCategory !== "all") {
-            const catLower = selectedCategory.toLowerCase();
-            if (!itemCatsRaw.includes(catLower)) {
-                return false;
-            }
+        if (selectedCategory !== "all" && !itemCats.includes(selectedCategory)) {
+            return false;
         }
 
         // SUBCATEGORY FILTER
-        if (selectedSub !== "all") {
-            const subLower = selectedSub.toLowerCase();
-            if (!itemSubsRaw.includes(subLower)) {
-                return false;
-            }
+        if (selectedSub !== "all" && !itemSubs.includes(selectedSub)) {
+            return false;
         }
 
         // FULL TEXT SEARCH
-        if (keyword) {
-            const haystack = buildHaystack(item);
-            if (!haystack.includes(keyword)) {
-                return false;
-            }
+        if (keyword && !buildHaystack(item).includes(keyword)) {
+            return false;
         }
 
         return true;
@@ -166,21 +158,16 @@ function applyFilters() {
 // FILTER POPULATION
 // -----------------------------
 function resetSubcategoryFilter() {
-    subcategorySelect.innerHTML = "";
-    const optAll = document.createElement("option");
-    optAll.value = "all";
-    optAll.textContent = "All subcategories";
-    subcategorySelect.appendChild(optAll);
+    subcategorySelect.innerHTML = `<option value="all">All subcategories</option>`;
     subcategorySelect.disabled = true;
 }
 
 function populateCategoryFilter() {
-    // Keep existing "All categories" at index 0, clear others
     while (categorySelect.options.length > 1) {
         categorySelect.remove(1);
     }
 
-    const cats = Object.keys(categoryMap || {}).sort();
+    const cats = Object.keys(categoryMap).sort();
     cats.forEach(cat => {
         const opt = document.createElement("option");
         opt.value = cat;
@@ -192,20 +179,14 @@ function populateCategoryFilter() {
 function populateSubcategoryFilterForCategory(category) {
     resetSubcategoryFilter();
 
-    if (!category || category === "all") {
-        return;
-    }
+    if (!category || category === "all") return;
 
     const subs = categoryMap[category] || [];
-    if (subs.length === 0) {
-        return;
-    }
-
-    subcategorySelect.disabled = true; // will enable after options added
+    if (subs.length === 0) return;
 
     subs
         .slice()
-        .sort((a, b) => a.localeCompare(b))
+        .sort()
         .forEach(sub => {
             const opt = document.createElement("option");
             opt.value = sub;
@@ -243,8 +224,7 @@ async function init() {
 searchInput.addEventListener("input", () => applyFilters());
 
 categorySelect.addEventListener("change", () => {
-    const selectedCategory = categorySelect.value;
-    populateSubcategoryFilterForCategory(selectedCategory);
+    populateSubcategoryFilterForCategory(categorySelect.value.toLowerCase());
     applyFilters();
 });
 
