@@ -136,3 +136,19 @@ select {
         min-height: auto;
     }
 }
+.reset-btn {
+    padding: 14px 18px;
+    border-radius: 10px;
+    border: none;
+    background: #dde3ff;
+    color: #333;
+    font-size: 16px;
+    cursor: pointer;
+    transition: 0.2s;
+    white-space: nowrap;
+}
+
+.reset-btn:hover {
+    background: #c7d0ff;
+}
+
