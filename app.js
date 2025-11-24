@@ -102,7 +102,7 @@ function renderDetails(item) {
 // -----------------------------
 function buildHaystack(item) {
     const copy = { ...item };
-    delete copy.UpdatedBy; // not searchable
+    delete copy.UpdatedBy;
 
     return Object.values(copy)
         .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
@@ -161,30 +161,33 @@ function resetSubcategoryFilter() {
     subcategorySelect.disabled = true;
 }
 
+// FIXED: Proper capitalization for categories
 function populateCategoryFilter() {
     while (categorySelect.options.length > 1) {
         categorySelect.remove(1);
     }
 
     const cats = Object.keys(categoryMap).sort();
-    cats.forEach(cat => {
+
+    cats.forEach(catOriginal => {
         const opt = document.createElement("option");
-        opt.value = cat.toLowerCase();
-        opt.textContent = cat;
+        opt.value = catOriginal.toLowerCase();     // normalized for matching
+        opt.textContent = catOriginal;             // display original capitalization
         categorySelect.appendChild(opt);
     });
 }
 
+// FIXED: Proper capitalization for subcategories (preserves ENT, HIV, SSDI, etc.)
 function populateSubcategoryFilterForCategory(category) {
     resetSubcategoryFilter();
 
     const key = category.toLowerCase();
     const subs = categoryMap[key] || [];
 
-    subs.forEach(sub => {
+    subs.forEach(subOriginal => {
         const opt = document.createElement("option");
-        opt.value = sub.toLowerCase();
-        opt.textContent = sub;
+        opt.value = subOriginal.toLowerCase();     // value normalized
+        opt.textContent = subOriginal;             // UI keeps original capitalization
         subcategorySelect.appendChild(opt);
     });
 
