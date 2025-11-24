@@ -43,28 +43,6 @@ function showError(message) {
 }
 
 // -----------------------------
-// DISPLAY CAPITALIZATION FIXES
-// -----------------------------
-
-// Properly formats categories/subcategories for display
-function prettyLabel(str) {
-    if (!str) return "";
-
-    return str
-        .split(" ")
-        .map(word => {
-            const upper = word.toUpperCase();
-            // Words that should remain fully uppercase (acronyms)
-            const ACRONYMS = ["SSI", "SSDI", "ENT", "HIV", "SNAP", "TANF"];
-            if (ACRONYMS.includes(upper)) return upper;
-
-            // Otherwise capitalize only the first letter
-            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-        })
-        .join(" ");
-}
-
-// -----------------------------
 // RENDERING FUNCTIONS
 // -----------------------------
 function renderList(data) {
@@ -107,13 +85,8 @@ function renderDetails(item) {
             websiteHref ? `<a href="${websiteHref}" target="_blank" rel="noopener noreferrer">${website}</a>` : ""
         }</div>
 
-        <div class="details-field"><strong>Categories:</strong> ${
-            prettyLabel(item.Categories)
-        }</div>
-
-        <div class="details-field"><strong>Subcategories:</strong> ${
-            prettyLabel(item.Subcategories)
-        }</div>
+        <div class="details-field"><strong>Categories:</strong> ${item.Categories || ""}</div>
+        <div class="details-field"><strong>Subcategories:</strong> ${item.Subcategories || ""}</div>
 
         <div class="details-field"><strong>Eligibility:</strong> ${item.Eligibility || ""}</div>
         <div class="details-field"><strong>Hours:</strong> ${item.Hours || ""}</div>
@@ -155,8 +128,8 @@ function applyFilters() {
     }
 
     const keyword = (searchInput.value || "").trim().toLowerCase();
-    const selectedCategory = categorySelect.value;
-    const selectedSub = subcategorySelect.value;
+    const selectedCategory = categorySelect.value;      // lowercase value
+    const selectedSub = subcategorySelect.value;        // lowercase value
 
     const filtered = globalData.filter(item => {
         const itemCats = parseCsvField(item.Categories).map(c => c.toLowerCase());
@@ -193,25 +166,25 @@ function populateCategoryFilter() {
         categorySelect.remove(1);
     }
 
-    const cats = Object.keys(categoryMap).sort();
-    cats.forEach(cat => {
+    for (const originalLabel of Object.keys(categoryMap)) {
+        const lowerKey = originalLabel.toLowerCase();
+
         const opt = document.createElement("option");
-        opt.value = cat.toLowerCase();
-        opt.textContent = prettyLabel(cat);
+        opt.value = lowerKey;           // matching
+        opt.textContent = originalLabel; // display exact original casing
         categorySelect.appendChild(opt);
-    });
+    }
 }
 
-function populateSubcategoryFilterForCategory(category) {
+function populateSubcategoryFilterForCategory(categoryLower) {
     resetSubcategoryFilter();
 
-    const key = category.toLowerCase();
-    const subs = categoryMap[key] || [];
+    const subs = categoryMapOriginal[categoryLower] || [];
 
-    subs.forEach(sub => {
+    subs.forEach(originalSub => {
         const opt = document.createElement("option");
-        opt.value = sub.toLowerCase();
-        opt.textContent = prettyLabel(sub);
+        opt.value = originalSub.toLowerCase();
+        opt.textContent = originalSub;
         subcategorySelect.appendChild(opt);
     });
 
@@ -242,7 +215,8 @@ function resetAll() {
 // GLOBAL STATE
 // -----------------------------
 let globalData = [];
-let categoryMap = {};
+let categoryMapOriginal = {};    // exact labels
+let categoryMap = {};            // lowercase → original
 
 // -----------------------------
 // INITIAL LOAD
@@ -253,12 +227,12 @@ async function init() {
     const [data, cats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
-    // Normalize keys only (NOT display)
-    const normalized = {};
-    for (const key in cats) {
-        normalized[key.toLowerCase()] = cats[key];
+    categoryMapOriginal = cats;
+
+    categoryMap = {};
+    for (const cat of Object.keys(cats)) {
+        categoryMap[cat.toLowerCase()] = cats[cat]; // store original list
     }
-    categoryMap = normalized;
 
     populateCategoryFilter();
     resetSubcategoryFilter();
