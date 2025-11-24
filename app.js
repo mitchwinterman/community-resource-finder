@@ -43,6 +43,28 @@ function showError(message) {
 }
 
 // -----------------------------
+// DISPLAY CAPITALIZATION FIXES
+// -----------------------------
+
+// Properly formats categories/subcategories for display
+function prettyLabel(str) {
+    if (!str) return "";
+
+    return str
+        .split(" ")
+        .map(word => {
+            const upper = word.toUpperCase();
+            // Words that should remain fully uppercase (acronyms)
+            const ACRONYMS = ["SSI", "SSDI", "ENT", "HIV", "SNAP", "TANF"];
+            if (ACRONYMS.includes(upper)) return upper;
+
+            // Otherwise capitalize only the first letter
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        })
+        .join(" ");
+}
+
+// -----------------------------
 // RENDERING FUNCTIONS
 // -----------------------------
 function renderList(data) {
@@ -85,8 +107,13 @@ function renderDetails(item) {
             websiteHref ? `<a href="${websiteHref}" target="_blank" rel="noopener noreferrer">${website}</a>` : ""
         }</div>
 
-        <div class="details-field"><strong>Categories:</strong> ${item.Categories || ""}</div>
-        <div class="details-field"><strong>Subcategories:</strong> ${item.Subcategories || ""}</div>
+        <div class="details-field"><strong>Categories:</strong> ${
+            prettyLabel(item.Categories)
+        }</div>
+
+        <div class="details-field"><strong>Subcategories:</strong> ${
+            prettyLabel(item.Subcategories)
+        }</div>
 
         <div class="details-field"><strong>Eligibility:</strong> ${item.Eligibility || ""}</div>
         <div class="details-field"><strong>Hours:</strong> ${item.Hours || ""}</div>
@@ -161,33 +188,30 @@ function resetSubcategoryFilter() {
     subcategorySelect.disabled = true;
 }
 
-// FIXED: Proper capitalization for categories
 function populateCategoryFilter() {
     while (categorySelect.options.length > 1) {
         categorySelect.remove(1);
     }
 
     const cats = Object.keys(categoryMap).sort();
-
-    cats.forEach(catOriginal => {
+    cats.forEach(cat => {
         const opt = document.createElement("option");
-        opt.value = catOriginal.toLowerCase();     // normalized for matching
-        opt.textContent = catOriginal;             // display original capitalization
+        opt.value = cat.toLowerCase();
+        opt.textContent = prettyLabel(cat);
         categorySelect.appendChild(opt);
     });
 }
 
-// FIXED: Proper capitalization for subcategories (preserves ENT, HIV, SSDI, etc.)
 function populateSubcategoryFilterForCategory(category) {
     resetSubcategoryFilter();
 
     const key = category.toLowerCase();
     const subs = categoryMap[key] || [];
 
-    subs.forEach(subOriginal => {
+    subs.forEach(sub => {
         const opt = document.createElement("option");
-        opt.value = subOriginal.toLowerCase();     // value normalized
-        opt.textContent = subOriginal;             // UI keeps original capitalization
+        opt.value = sub.toLowerCase();
+        opt.textContent = prettyLabel(sub);
         subcategorySelect.appendChild(opt);
     });
 
@@ -229,6 +253,7 @@ async function init() {
     const [data, cats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
+    // Normalize keys only (NOT display)
     const normalized = {};
     for (const key in cats) {
         normalized[key.toLowerCase()] = cats[key];
