@@ -102,7 +102,7 @@ function renderDetails(item) {
 // -----------------------------
 function buildHaystack(item) {
     const copy = { ...item };
-    delete copy.UpdatedBy;
+    delete copy.UpdatedBy; // not searchable
 
     return Object.values(copy)
         .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
@@ -128,21 +128,24 @@ function applyFilters() {
     }
 
     const keyword = (searchInput.value || "").trim().toLowerCase();
-    const selectedCategory = categorySelect.value;      // lowercase value
-    const selectedSub = subcategorySelect.value;        // lowercase value
+    const selectedCategory = categorySelect.value;   // "all" or lowercase category
+    const selectedSub = subcategorySelect.value;     // "all" or lowercase subcategory
 
     const filtered = globalData.filter(item => {
         const itemCats = parseCsvField(item.Categories).map(c => c.toLowerCase());
         const itemSubs = parseCsvField(item.Subcategories).map(s => s.toLowerCase());
 
+        // Category filter
         if (selectedCategory !== "all" && !itemCats.includes(selectedCategory)) {
             return false;
         }
 
+        // Subcategory filter
         if (selectedSub !== "all" && !itemSubs.includes(selectedSub)) {
             return false;
         }
 
+        // Full text search
         if (keyword && !buildHaystack(item).includes(keyword)) {
             return false;
         }
@@ -156,35 +159,41 @@ function applyFilters() {
 // -----------------------------
 // FILTER POPULATION
 // -----------------------------
+
+// Clears subcategory dropdown back to "All subcategories" and disables it
 function resetSubcategoryFilter() {
     subcategorySelect.innerHTML = `<option value="all">All subcategories</option>`;
     subcategorySelect.disabled = true;
 }
 
+// Populates category dropdown using exact labels from categories.json,
+// but uses lowercase values internally for matching.
 function populateCategoryFilter() {
     while (categorySelect.options.length > 1) {
         categorySelect.remove(1);
     }
 
-    for (const originalLabel of Object.keys(categoryMap)) {
-        const lowerKey = originalLabel.toLowerCase();
-
+    // categoryOptions array already sorted by label
+    categoryOptions.forEach(cat => {
         const opt = document.createElement("option");
-        opt.value = lowerKey;           // matching
-        opt.textContent = originalLabel; // display exact original casing
+        opt.value = cat.value;       // lowercase key
+        opt.textContent = cat.label; // exact casing from JSON
         categorySelect.appendChild(opt);
-    }
+    });
 }
 
+// Populates subcategory dropdown for the given lowercase category key
 function populateSubcategoryFilterForCategory(categoryLower) {
     resetSubcategoryFilter();
 
-    const subs = categoryMapOriginal[categoryLower] || [];
+    if (!categoryLower || categoryLower === "all") return;
 
-    subs.forEach(originalSub => {
+    const subs = subcategoryMap[categoryLower] || [];
+
+    subs.forEach(sub => {
         const opt = document.createElement("option");
-        opt.value = originalSub.toLowerCase();
-        opt.textContent = originalSub;
+        opt.value = sub.value;       // lowercase
+        opt.textContent = sub.label; // original casing, incl. SSDI, SSI, ENT, etc.
         subcategorySelect.appendChild(opt);
     });
 
@@ -197,10 +206,12 @@ function populateSubcategoryFilterForCategory(categoryLower) {
 // RESET BUTTON
 // -----------------------------
 function resetAll() {
+    // Clear search and filters
     searchInput.value = "";
     categorySelect.value = "all";
     resetSubcategoryFilter();
 
+    // Restore default details panel message
     detailsDiv.innerHTML = `
         <div style="text-align:center; color:#666;">
             Select a resource<br>
@@ -208,6 +219,7 @@ function resetAll() {
         </div>
     `;
 
+    // Re-render full list
     applyFilters();
 }
 
@@ -215,8 +227,12 @@ function resetAll() {
 // GLOBAL STATE
 // -----------------------------
 let globalData = [];
-let categoryMapOriginal = {};    // exact labels
-let categoryMap = {};            // lowercase → original
+
+// categoryOptions: [{ value: "health & medical".toLowerCase(), label: "Health & Medical" }, ...]
+let categoryOptions = [];
+
+// subcategoryMap: { "health & medical": [ { value:"ssdi", label:"SSDI" }, ... ] }
+let subcategoryMap = {};
 
 // -----------------------------
 // INITIAL LOAD
@@ -227,12 +243,31 @@ async function init() {
     const [data, cats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
-    categoryMapOriginal = cats;
+    // Build categoryOptions and subcategoryMap from categories.json
+    categoryOptions = [];
+    subcategoryMap = {};
 
-    categoryMap = {};
-    for (const cat of Object.keys(cats)) {
-        categoryMap[cat.toLowerCase()] = cats[cat]; // store original list
-    }
+    Object.entries(cats || {}).forEach(([catLabel, subList]) => {
+        const catLower = catLabel.toLowerCase();
+
+        // Store category option
+        categoryOptions.push({
+            value: catLower,
+            label: catLabel
+        });
+
+        // Store subcategories for this category
+        const subsArray = Array.isArray(subList) ? subList : [];
+        subcategoryMap[catLower] = subsArray
+            .map(subLabel => ({
+                value: subLabel.toLowerCase(),
+                label: subLabel
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label));
+    });
+
+    // Sort categories alphabetically by label
+    categoryOptions.sort((a, b) => a.label.localeCompare(b.label));
 
     populateCategoryFilter();
     resetSubcategoryFilter();
@@ -245,7 +280,8 @@ async function init() {
 searchInput.addEventListener("input", applyFilters);
 
 categorySelect.addEventListener("change", () => {
-    populateSubcategoryFilterForCategory(categorySelect.value);
+    const catLower = categorySelect.value; // already lowercase or "all"
+    populateSubcategoryFilterForCategory(catLower);
     applyFilters();
 });
 
