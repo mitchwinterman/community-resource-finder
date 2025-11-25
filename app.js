@@ -43,6 +43,24 @@ function showError(message) {
 }
 
 // -----------------------------
+// TEXT FORMATTING HELPERS
+// -----------------------------
+
+// Capitalizes normally but preserves acronyms (ENT, SSI, SNAP, WIC, VA, LGBTQ)
+function formatDisplayText(text) {
+    if (!text) return "";
+
+    const acronyms = ["ENT", "SSI", "SSDI", "SNAP", "WIC", "VA", "LGBTQ"];
+    if (acronyms.includes(text.toUpperCase())) {
+        return text.toUpperCase();
+    }
+
+    return text
+        .toLowerCase()
+        .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// -----------------------------
 // RENDERING FUNCTIONS
 // -----------------------------
 function renderList(data) {
@@ -102,10 +120,10 @@ function renderDetails(item) {
 // -----------------------------
 function buildHaystack(item) {
     const copy = { ...item };
-    delete copy.UpdatedBy; // not searchable
+    delete copy.UpdatedBy;
 
     return Object.values(copy)
-        .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
+        .filter(v => v)
         .join(" | ")
         .toLowerCase();
 }
@@ -122,33 +140,17 @@ function parseCsvField(value) {
 // FILTERING
 // -----------------------------
 function applyFilters() {
-    if (!Array.isArray(globalData)) {
-        renderList([]);
-        return;
-    }
-
     const keyword = (searchInput.value || "").trim().toLowerCase();
-    const selectedCategory = categorySelect.value;   // "all" or lowercase category
-    const selectedSub = subcategorySelect.value;     // "all" or lowercase subcategory
+    const selectedCategory = categorySelect.value;
+    const selectedSub = subcategorySelect.value;
 
     const filtered = globalData.filter(item => {
         const itemCats = parseCsvField(item.Categories).map(c => c.toLowerCase());
         const itemSubs = parseCsvField(item.Subcategories).map(s => s.toLowerCase());
 
-        // Category filter
-        if (selectedCategory !== "all" && !itemCats.includes(selectedCategory)) {
-            return false;
-        }
-
-        // Subcategory filter
-        if (selectedSub !== "all" && !itemSubs.includes(selectedSub)) {
-            return false;
-        }
-
-        // Full text search
-        if (keyword && !buildHaystack(item).includes(keyword)) {
-            return false;
-        }
+        if (selectedCategory !== "all" && !itemCats.includes(selectedCategory)) return false;
+        if (selectedSub !== "all" && !itemSubs.includes(selectedSub)) return false;
+        if (keyword && !buildHaystack(item).includes(keyword)) return false;
 
         return true;
     });
@@ -159,59 +161,51 @@ function applyFilters() {
 // -----------------------------
 // FILTER POPULATION
 // -----------------------------
-
-// Clears subcategory dropdown back to "All subcategories" and disables it
 function resetSubcategoryFilter() {
     subcategorySelect.innerHTML = `<option value="all">All subcategories</option>`;
     subcategorySelect.disabled = true;
 }
 
-// Populates category dropdown using exact labels from categories.json,
-// but uses lowercase values internally for matching.
 function populateCategoryFilter() {
     while (categorySelect.options.length > 1) {
         categorySelect.remove(1);
     }
 
-    // categoryOptions array already sorted by label
-    categoryOptions.forEach(cat => {
+    const sorted = Object.keys(categoryMap).sort();
+
+    sorted.forEach(rawKey => {
         const opt = document.createElement("option");
-        opt.value = cat.value;       // lowercase key
-        opt.textContent = cat.label; // exact casing from JSON
+        opt.value = rawKey;  // lowercase key
+        opt.textContent = formatDisplayText(categoryMap[rawKey].display); // display version
         categorySelect.appendChild(opt);
     });
 }
 
-// Populates subcategory dropdown for the given lowercase category key
-function populateSubcategoryFilterForCategory(categoryLower) {
+function populateSubcategoryFilterForCategory(categoryKey) {
     resetSubcategoryFilter();
+    if (!categoryKey || categoryKey === "all") return;
 
-    if (!categoryLower || categoryLower === "all") return;
-
-    const subs = subcategoryMap[categoryLower] || [];
+    const subs = categoryMap[categoryKey]?.subcategories || [];
+    subs.sort((a, b) => a.localeCompare(b));
 
     subs.forEach(sub => {
         const opt = document.createElement("option");
-        opt.value = sub.value;       // lowercase
-        opt.textContent = sub.label; // original casing, incl. SSDI, SSI, ENT, etc.
+        opt.value = sub.toLowerCase();
+        opt.textContent = formatDisplayText(sub);
         subcategorySelect.appendChild(opt);
     });
 
-    if (subs.length > 0) {
-        subcategorySelect.disabled = false;
-    }
+    if (subs.length > 0) subcategorySelect.disabled = false;
 }
 
 // -----------------------------
 // RESET BUTTON
 // -----------------------------
 function resetAll() {
-    // Clear search and filters
     searchInput.value = "";
     categorySelect.value = "all";
     resetSubcategoryFilter();
 
-    // Restore default details panel message
     detailsDiv.innerHTML = `
         <div style="text-align:center; color:#666;">
             Select a resource<br>
@@ -219,7 +213,6 @@ function resetAll() {
         </div>
     `;
 
-    // Re-render full list
     applyFilters();
 }
 
@@ -227,12 +220,7 @@ function resetAll() {
 // GLOBAL STATE
 // -----------------------------
 let globalData = [];
-
-// categoryOptions: [{ value: "health & medical".toLowerCase(), label: "Health & Medical" }, ...]
-let categoryOptions = [];
-
-// subcategoryMap: { "health & medical": [ { value:"ssdi", label:"SSDI" }, ... ] }
-let subcategoryMap = {};
+let categoryMap = {};
 
 // -----------------------------
 // INITIAL LOAD
@@ -243,31 +231,17 @@ async function init() {
     const [data, cats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
-    // Build categoryOptions and subcategoryMap from categories.json
-    categoryOptions = [];
-    subcategoryMap = {};
+    // convert categories.json into { lowerKey : {display:"Correct Caps", subcategories:[...] } }
+    const normalized = {};
+    for (const key in cats) {
+        const lower = key.toLowerCase();
+        normalized[lower] = {
+            display: key,
+            subcategories: cats[key]
+        };
+    }
 
-    Object.entries(cats || {}).forEach(([catLabel, subList]) => {
-        const catLower = catLabel.toLowerCase();
-
-        // Store category option
-        categoryOptions.push({
-            value: catLower,
-            label: catLabel
-        });
-
-        // Store subcategories for this category
-        const subsArray = Array.isArray(subList) ? subList : [];
-        subcategoryMap[catLower] = subsArray
-            .map(subLabel => ({
-                value: subLabel.toLowerCase(),
-                label: subLabel
-            }))
-            .sort((a, b) => a.label.localeCompare(b.label));
-    });
-
-    // Sort categories alphabetically by label
-    categoryOptions.sort((a, b) => a.label.localeCompare(b.label));
+    categoryMap = normalized;
 
     populateCategoryFilter();
     resetSubcategoryFilter();
@@ -280,8 +254,7 @@ async function init() {
 searchInput.addEventListener("input", applyFilters);
 
 categorySelect.addEventListener("change", () => {
-    const catLower = categorySelect.value; // already lowercase or "all"
-    populateSubcategoryFilterForCategory(catLower);
+    populateSubcategoryFilterForCategory(categorySelect.value);
     applyFilters();
 });
 
