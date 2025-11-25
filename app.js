@@ -47,22 +47,21 @@ let selectedResourceId = null;
 // HELPER FUNCTIONS
 // -----------------------------
 
-// --- FIX FOR ISSUE 2: Capitalization ---
-// Expanded list to catch acronyms when they are part of a longer phrase.
+// --- FIX: Capitalization Map ---
 const specialSubcategoryCaps = {
     "aba": "ABA",
     "foster care": "Foster Care",
     "hiv": "HIV",
     "hiv services": "HIV Services",
-    "hiv testing": "HIV Testing", // ADDED
+    "hiv testing": "HIV Testing",
     "hud-vash": "HUD-VASH",
     "snap/food stamps": "SNAP/Food Stamps",
     "psyc": "PSYC",
     "psychosocial rehab (psr)": "Psychosocial Rehab (PSR)",
     "ssdi": "SSDI",
-    "ssdi benefits": "SSDI Benefits", // ADDED
+    "ssdi benefits": "SSDI Benefits",
     "ssi": "SSI",
-    "ssi eligibility": "SSI Eligibility", // ADDED
+    "ssi eligibility": "SSI Eligibility",
     "tanf": "TANF",
     "wic": "WIC",
     "lgbtq+": "LGBTQ+",
@@ -70,6 +69,7 @@ const specialSubcategoryCaps = {
 };
 
 function formatSubcategoryLabel(label) {
+    if (!label) return "";
     const lower = label.toLowerCase();
     
     // 1. Check if the entire lowercase label is in the special caps map
@@ -77,28 +77,21 @@ function formatSubcategoryLabel(label) {
         return specialSubcategoryCaps[lower];
     }
 
-    // 2. Fallback to title-casing logic (assuming standard Title Case function is present or similar)
-    // NOTE: If you have a title-case function, it should be here. 
-    // For simplicity and based on context, we assume a basic capitalization for non-special cases:
-    if (label && typeof label === 'string') {
-        return label.split(' ').map(word => {
-            if (word.length > 0) {
-                return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-            }
-            return '';
-        }).join(' ');
-    }
-
+    // 2. Simple fallback capitalization
     return label;
+}
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function renderResults(resources) {
     resultsDiv.innerHTML = '';
-    detailsDiv.innerHTML = '<small>Select a resource from the list to view its details.</small>';
+    detailsDiv.innerHTML = '<div style="text-align:center; color:#666;">Select a resource<br><small>Use the search bar or filters above to find a resource, then click to view full details.</small></div>';
     selectedResourceId = null;
 
     if (resources.length === 0) {
-        resultsDiv.innerHTML = '<div class="no-results">No resources found matching the current filters.</div>';
+        resultsDiv.innerHTML = '<div class="result-card">No results found.</div>';
         return;
     }
 
@@ -106,64 +99,69 @@ function renderResults(resources) {
         const card = document.createElement('div');
         card.className = 'result-card';
         card.innerHTML = `
-            <div class="card-title">${resource.Organization}</div>
-            <div class="card-description">${resource.Description}</div>
+            <div class="card-title"><strong>${resource.Organization}</strong></div>
+            <div class="card-description">${resource.Description || ""}</div>
         `;
         card.onclick = () => showDetails(resource);
         resultsDiv.appendChild(card);
     });
-
-    // Automatically select the first resource if none is selected
-    if (resources.length > 0) {
-        showDetails(resources[0]);
-    }
 }
 
 function showDetails(resource) {
-    selectedResourceId = resource.Organization; // Using Organization as unique ID
-    
-    // Deselect previous card and select current
-    document.querySelectorAll('.result-card').forEach(card => card.classList.remove('selected'));
-    const currentCard = Array.from(resultsDiv.querySelectorAll('.result-card')).find(card => 
-        card.querySelector('.card-title').textContent === resource.Organization
-    );
-    if (currentCard) {
-        currentCard.classList.add('selected');
-    }
+    // Highlight selected card
+    const cards = document.querySelectorAll('.result-card');
+    cards.forEach(c => c.style.borderLeft = "none");
+    // (Optional: add visual selection logic here if desired, or rely on CSS :focus)
+
+    const website = resource.Website ? String(resource.Website).trim() : "";
+    const websiteHref = website
+        ? (website.startsWith("http") ? website : "https://" + website)
+        : "";
+
+    // Parse subcategories for display
+    const formattedSubcategories = String(resource.Subcategories || "")
+        .split(",")
+        .map(v => v.trim())
+        .filter(v => v.length > 0)
+        .map(formatSubcategoryLabel)
+        .join(", ");
 
     detailsDiv.innerHTML = `
-        <h2 class="details-title">${resource.Organization}</h2>
-        <p class="details-section">${resource.Description}</p>
+        <div class="details-title">${resource.Organization || "No name"}</div>
+        <div class="details-field"><strong>Description:</strong> ${resource.Description || ""}</div>
         
-        <div class="details-row">
-            <div><strong>Categories:</strong> ${resource.Categories}</div>
-            <div><strong>Subcategories:</strong> ${resource.Subcategories}</div>
-        </div>
+        <div class="details-field"><strong>Address:</strong> ${resource.Address || ""}</div>
+        <div class="details-field"><strong>City:</strong> ${resource.City || ""}</div>
+        <div class="details-field"><strong>Zip:</strong> ${resource.Zip || ""}</div>
+        <div class="details-field"><strong>Phone:</strong> ${resource.Phone || ""}</div>
+        <div class="details-field"><strong>Email:</strong> ${resource.Email || ""}</div>
 
-        <div class="details-row">
-            <div><strong>Phone:</strong> ${resource.Phone || 'N/A'}</div>
-            <div><strong>Email:</strong> ${resource.Email || 'N/A'}</div>
-        </div>
+        <div class="details-field"><strong>Website:</strong> ${
+            websiteHref ? `<a href="${websiteHref}" target="_blank" rel="noopener noreferrer">${website}</a>` : ""
+        }</div>
 
-        <div><strong>Address:</strong> ${resource.Address ? `${resource.Address}, ${resource.City}` : 'N/A'}</div>
-        
-        ${resource.Website ? `<div><a href="${resource.Website}" target="_blank" class="details-link">Visit Website</a></div>` : ''}
-        
-        <p class="details-section"><strong>Hours:</strong> ${resource.Hours || 'Varies'}</p>
-        <p class="details-section"><strong>Eligibility:</strong> ${resource.Eligibility || 'None specified'}</p>
-        <p class="details-section"><strong>Cost:</strong> ${resource.Cost || 'None specified'}</p>
-        <p class="details-section"><strong>Notes:</strong> ${resource.Notes || 'None'}</p>
-        <p class="details-small">Last Verified: ${resource['Last Verified'] || 'N/A'}</p>
+        <div class="details-field"><strong>Categories:</strong> ${resource.Categories || ""}</div>
+        <div class="details-field"><strong>Subcategories:</strong> ${formattedSubcategories || ""}</div>
+
+        <div class="details-field"><strong>Eligibility:</strong> ${resource.Eligibility || ""}</div>
+        <div class="details-field"><strong>Hours:</strong> ${resource.Hours || ""}</div>
+        <div class="details-field"><strong>Cost:</strong> ${resource.Cost || ""}</div>
+        <div class="details-field"><strong>Last Verified:</strong> ${resource["Last Verified"] || ""}</div>
+        <div class="details-field"><strong>Notes:</strong> ${resource.Notes || ""}</div>
     `;
 }
 
 function showError(message) {
-    resultsDiv.innerHTML = `<div class="error">${message}</div>`;
+    resultsDiv.innerHTML = `<div class="result-card">${message}</div>`;
 }
 
-
+// -----------------------------
+// FILTER POPULATION
+// -----------------------------
 function populateCategoryFilter() {
+    // Clear everything except "All categories"
     categorySelect.innerHTML = '<option value="all">All categories</option>';
+    
     categoryOptions.forEach(option => {
         const opt = document.createElement('option');
         opt.value = option.value;
@@ -174,19 +172,23 @@ function populateCategoryFilter() {
 
 function populateSubcategoryFilterForCategory(categoryValue) {
     subcategorySelect.innerHTML = '<option value="all">All subcategories</option>';
-    subcategorySelect.disabled = (categoryValue === 'all');
     
-    if (categoryValue !== 'all' && subcategoryOptions[categoryValue]) {
-        subcategoryOptions[categoryValue].forEach(option => {
+    if (!categoryValue || categoryValue === 'all') {
+        subcategorySelect.disabled = true;
+        return;
+    }
+
+    const subs = subcategoryOptions[categoryValue];
+    if (subs && subs.length > 0) {
+        subcategorySelect.disabled = false;
+        subs.forEach(option => {
             const opt = document.createElement('option');
             opt.value = option.value;
             opt.textContent = option.label;
             subcategorySelect.appendChild(opt);
         });
-    }
-    // Set selection back to 'all' if the current selected sub is no longer available
-    if (subcategorySelect.value !== 'all' && !subcategoryOptions[categoryValue].find(o => o.value === subcategorySelect.value)) {
-        subcategorySelect.value = 'all';
+    } else {
+        subcategorySelect.disabled = true;
     }
 }
 
@@ -204,14 +206,14 @@ function resetAll() {
 }
 
 // ------------------------------------
-// MAIN FILTERING FUNCTION
+// MAIN FILTERING FUNCTION (FIXED)
 // ------------------------------------
 function applyFilters() {
-    const searchTerm = searchInput.value.toLowerCase();
+    const searchTerm = (searchInput.value || "").trim().toLowerCase();
     const categoryFilter = categorySelect.value;
     const subcategoryFilter = subcategorySelect.value;
     
-    let filteredData = globalData.filter(resource => {
+    const filteredData = globalData.filter(resource => {
         // 1. SEARCH FILTER
         if (searchTerm) {
             const searchFields = [
@@ -227,28 +229,27 @@ function applyFilters() {
             }
         }
 
-        // 2. CATEGORY FILTER (FIX FOR ISSUE 1: Robust Category Match)
+        // 2. CATEGORY FILTER (REGEX FIX)
+        // We use Regex to look for the phrase match, accounting for boundaries (commas or start/end of string).
+        // This solves the issue where splitting by "," broke categories like "Employment, Education & Financial Assistance".
         if (categoryFilter !== 'all') {
-            // Normalize the resource's category string into an array of lowercased, trimmed category names
-            const resourceCategories = resource.Categories
-                .split(',')
-                .map(c => c.trim().toLowerCase());
-
-            // Check if the selected category value is an exact match in the resource's array
-            if (!resourceCategories.includes(categoryFilter)) {
+            const escapedCat = escapeRegExp(categoryFilter);
+            // Regex reads: "Start of string OR comma", followed by whitespace (optional), 
+            // followed by our exact category name, followed by whitespace (optional), "comma OR end of string"
+            const regex = new RegExp(`(?:^|,)\\s*${escapedCat}\\s*(?:,|$)`, 'i');
+            
+            if (!regex.test(resource.Categories)) {
                 return false;
             }
         }
 
-        // 3. SUBCATEGORY FILTER
+        // 3. SUBCATEGORY FILTER (REGEX FIX)
+        // Applied same logic here for safety
         if (subcategoryFilter !== 'all') {
-            // Normalize the resource's subcategory string into an array of lowercased, trimmed subcategory names
-            const resourceSubcategories = resource.Subcategories
-                .split(',')
-                .map(s => s.trim().toLowerCase());
-
-            // Check if the selected subcategory value is an exact match
-            if (!resourceSubcategories.includes(subcategoryFilter)) {
+            const escapedSub = escapeRegExp(subcategoryFilter);
+            const regex = new RegExp(`(?:^|,)\\s*${escapedSub}\\s*(?:,|$)`, 'i');
+            
+            if (!regex.test(resource.Subcategories)) {
                 return false;
             }
         }
@@ -263,21 +264,21 @@ function applyFilters() {
 // INIT
 // -----------------------------
 async function init() {
+    resultsDiv.innerHTML = '<div class="result-card">Loading…</div>';
+
     // Load Data
-    globalData = await loadData();
-    if (globalData.length === 0) return;
+    const [data, rawCats] = await Promise.all([loadData(), loadCategories()]);
+    globalData = Array.isArray(data) ? data : [];
 
-    // Load Categories & Subcategories
-    const rawData = await loadCategories();
-    const rawCategories = Array.isArray(rawData.categories) ? rawData.categories : [];
-    const rawSubcategories = rawData.subcategories || rawData; // Support older/simpler JSON structure
+    // Parse Categories
+    const rawCategories = Array.isArray(rawCats.categories) ? rawCats.categories : [];
+    const rawSubcategories = rawCats.subcategories || {};
 
-    // Build categoryOptions and subcategoryOptions with normalized values
+    // Build Options
     categoryOptions = [];
     subcategoryOptions = {};
 
-    // Get a unique list of category labels to iterate over, either from rawCategories (if simple array) 
-    // or from the keys of rawSubcategories (if it's the full JSON object)
+    // Use keys from subcategories object if main list is missing, or vice versa
     const categoryLabels = rawCategories.length > 0 ? rawCategories : Object.keys(rawSubcategories);
 
     categoryLabels.forEach(catLabel => {
@@ -290,7 +291,7 @@ async function init() {
             value: valueLower
         });
 
-        // Get subcategories for the current category label
+        // Get subcategories
         const subs = Array.isArray(rawSubcategories[catLabel])
             ? rawSubcategories[catLabel]
             : [];
