@@ -1,0 +1,90 @@
+body {
+    font-family: Arial, sans-serif;
+    background: #eef2f9;
+    margin: 0;
+    padding: 0;
+}
+
+.screen {
+    padding: 40px;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* LOGIN */
+#login-screen {
+    max-width: 350px;
+    margin: 80px auto;
+    background: white;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+#login-screen input {
+    width: 100%;
+    margin-bottom: 12px;
+    padding: 10px;
+}
+#login-screen button {
+    width: 100%;
+    padding: 12px;
+    background: #4455dd;
+    color: white;
+    border: none;
+    border-radius: 8px;
+}
+
+/* ADMIN */
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    background: #fff;
+    padding: 12px 20px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.nav {
+    margin-top: 20px;
+}
+.nav-btn {
+    padding: 12px;
+    margin-right: 10px;
+    border: none;
+    background: #3c7cff;
+    color: white;
+    border-radius: 6px;
+}
+
+/* PANELS */
+.panel {
+    background: white;
+    margin-top: 20px;
+    padding: 20px;
+    border-radius: 10px;
+}
+
+/* LISTS */
+#resource-list div,
+#category-list div {
+    padding: 10px;
+    background: #eef2ff;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.editor {
+    margin-top: 20px;
+    padding: 20px;
+    background: #f7f9ff;
+    border-radius: 10px;
+}
+
+.editor input,
+.editor textarea {
+    width: 100%;
+    margin-bottom: 12px;
+    padding: 10px;
+}
