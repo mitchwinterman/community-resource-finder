@@ -276,7 +276,7 @@ function applyFilters() {
 }
 
 // -----------------------------
-// INIT
+// INIT (FIXED STRUCTURE DETECTION)
 // -----------------------------
 async function init() {
     resultsDiv.innerHTML = '<div class="result-card">Loading…</div>';
@@ -285,16 +285,25 @@ async function init() {
     const [data, rawCats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
-    // Parse Categories
-    const rawCategories = Array.isArray(rawCats.categories) ? rawCats.categories : [];
-    const rawSubcategories = rawCats.subcategories || {};
+    // Parse Categories - Robust Check for Structure
+    let categoryLabels = [];
+    let rawSubcategories = {};
+
+    if (rawCats && Array.isArray(rawCats.categories)) {
+        // Structure A: { categories: [...], subcategories: {...} }
+        // (Old format support)
+        categoryLabels = rawCats.categories;
+        rawSubcategories = rawCats.subcategories || {};
+    } else if (rawCats) {
+        // Structure B: { "Category Name": ["Sub1", "Sub2"] }
+        // (Current file format)
+        categoryLabels = Object.keys(rawCats);
+        rawSubcategories = rawCats;
+    }
 
     // Build Options
     categoryOptions = [];
     subcategoryOptions = {};
-
-    // Use keys from subcategories object if main list is missing, or vice versa
-    const categoryLabels = rawCategories.length > 0 ? rawCategories : Object.keys(rawSubcategories);
 
     categoryLabels.forEach(catLabel => {
         if (!catLabel || typeof catLabel !== "string") return;
