@@ -36,28 +36,43 @@ const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
 
 // -----------------------------
+// GLOBAL STATE
+// -----------------------------
+let globalData = [];
+let categoryOptions = [];      // [{ value: "children, youth & family services", label: "Children, Youth & Family Services" }, ...]
+let subcategoryOptions = {};   // { "children, youth & family services": [{ value, label }, ...], ... }
+
+// -----------------------------
+// SPECIAL CAPITALIZATION MAP
+// -----------------------------
+// Keys are LOWERCASED subcategory labels, values are display labels
+const specialSubcategoryCaps = {
+    "hiv": "HIV",
+    "hiv services": "HIV Services",
+    "hiv & std services": "HIV & STD Services",
+    "ent": "ENT",
+    "ssdi": "SSDI",
+    "ssi": "SSI",
+    "snap": "SNAP",
+    "tanf": "TANF",
+    "wic": "WIC"
+};
+
+function formatSubcategoryLabel(label) {
+    if (!label) return "";
+    const lower = String(label).trim().toLowerCase();
+    if (specialSubcategoryCaps[lower]) {
+        return specialSubcategoryCaps[lower];
+    }
+    // Fall back to whatever is in the source (usually already reasonably capitalized)
+    return String(label).trim();
+}
+
+// -----------------------------
 // ERROR HANDLER
 // -----------------------------
 function showError(message) {
     resultsDiv.innerHTML = `<div class="result-card">${message}</div>`;
-}
-
-// -----------------------------
-// TEXT FORMATTING HELPERS
-// -----------------------------
-
-// Capitalizes normally but preserves acronyms (ENT, SSI, SNAP, WIC, VA, LGBTQ)
-function formatDisplayText(text) {
-    if (!text) return "";
-
-    const acronyms = ["ENT", "SSI", "SSDI", "SNAP", "WIC", "VA", "LGBTQ"];
-    if (acronyms.includes(text.toUpperCase())) {
-        return text.toUpperCase();
-    }
-
-    return text
-        .toLowerCase()
-        .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 // -----------------------------
@@ -89,6 +104,10 @@ function renderDetails(item) {
         ? (website.startsWith("http") ? website : "https://" + website)
         : "";
 
+    const formattedSubcategories = parseCsvField(item.Subcategories)
+        .map(formatSubcategoryLabel)
+        .join(", ");
+
     detailsDiv.innerHTML = `
         <div class="details-title">${item.Organization || "No name"}</div>
 
@@ -104,7 +123,7 @@ function renderDetails(item) {
         }</div>
 
         <div class="details-field"><strong>Categories:</strong> ${item.Categories || ""}</div>
-        <div class="details-field"><strong>Subcategories:</strong> ${item.Subcategories || ""}</div>
+        <div class="details-field"><strong>Subcategories:</strong> ${formattedSubcategories || ""}</div>
 
         <div class="details-field"><strong>Eligibility:</strong> ${item.Eligibility || ""}</div>
         <div class="details-field"><strong>Hours:</strong> ${item.Hours || ""}</div>
@@ -120,10 +139,10 @@ function renderDetails(item) {
 // -----------------------------
 function buildHaystack(item) {
     const copy = { ...item };
-    delete copy.UpdatedBy;
+    delete copy.UpdatedBy; // not searchable
 
     return Object.values(copy)
-        .filter(v => v)
+        .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
         .join(" | ")
         .toLowerCase();
 }
@@ -140,17 +159,33 @@ function parseCsvField(value) {
 // FILTERING
 // -----------------------------
 function applyFilters() {
+    if (!Array.isArray(globalData)) {
+        renderList([]);
+        return;
+    }
+
     const keyword = (searchInput.value || "").trim().toLowerCase();
-    const selectedCategory = categorySelect.value;
-    const selectedSub = subcategorySelect.value;
+    const selectedCategory = (categorySelect.value || "all").trim().toLowerCase();
+    const selectedSub = (subcategorySelect.value || "all").trim().toLowerCase();
 
     const filtered = globalData.filter(item => {
         const itemCats = parseCsvField(item.Categories).map(c => c.toLowerCase());
         const itemSubs = parseCsvField(item.Subcategories).map(s => s.toLowerCase());
 
-        if (selectedCategory !== "all" && !itemCats.includes(selectedCategory)) return false;
-        if (selectedSub !== "all" && !itemSubs.includes(selectedSub)) return false;
-        if (keyword && !buildHaystack(item).includes(keyword)) return false;
+        // CATEGORY FILTER
+        if (selectedCategory !== "all" && !itemCats.includes(selectedCategory)) {
+            return false;
+        }
+
+        // SUBCATEGORY FILTER
+        if (selectedSub !== "all" && !itemSubs.includes(selectedSub)) {
+            return false;
+        }
+
+        // FULL TEXT SEARCH
+        if (keyword && !buildHaystack(item).includes(keyword)) {
+            return false;
+        }
 
         return true;
     });
@@ -167,35 +202,50 @@ function resetSubcategoryFilter() {
 }
 
 function populateCategoryFilter() {
+    // Clear everything except the "All categories" option
     while (categorySelect.options.length > 1) {
         categorySelect.remove(1);
     }
 
-    const sorted = Object.keys(categoryMap).sort();
+    // Use categoryOptions built from categories.json
+    const sorted = [...categoryOptions].sort((a, b) =>
+        a.label.localeCompare(b.label)
+    );
 
-    sorted.forEach(rawKey => {
+    sorted.forEach(cat => {
         const opt = document.createElement("option");
-        opt.value = rawKey;  // lowercase key
-        opt.textContent = formatDisplayText(categoryMap[rawKey].display); // display version
+        opt.value = cat.value;      // normalized lowercase value
+        opt.textContent = cat.label; // nicely capitalized label from categories.json
         categorySelect.appendChild(opt);
     });
 }
 
-function populateSubcategoryFilterForCategory(categoryKey) {
+function populateSubcategoryFilterForCategory(categoryValue) {
     resetSubcategoryFilter();
-    if (!categoryKey || categoryKey === "all") return;
 
-    const subs = categoryMap[categoryKey]?.subcategories || [];
-    subs.sort((a, b) => a.localeCompare(b));
+    const key = (categoryValue || "").toLowerCase();
+    if (!key || key === "all") {
+        return;
+    }
 
-    subs.forEach(sub => {
-        const opt = document.createElement("option");
-        opt.value = sub.toLowerCase();
-        opt.textContent = formatDisplayText(sub);
-        subcategorySelect.appendChild(opt);
-    });
+    const subsForCategory = subcategoryOptions[key] || [];
 
-    if (subs.length > 0) subcategorySelect.disabled = false;
+    if (subsForCategory.length === 0) {
+        // No subcategories defined: leave disabled
+        return;
+    }
+
+    subsForCategory
+        .slice()
+        .sort((a, b) => a.label.localeCompare(b.label))
+        .forEach(sub => {
+            const opt = document.createElement("option");
+            opt.value = sub.value;       // normalized lowercase value
+            opt.textContent = sub.label; // formatted label (with special caps)
+            subcategorySelect.appendChild(opt);
+        });
+
+    subcategorySelect.disabled = false;
 }
 
 // -----------------------------
@@ -217,12 +267,6 @@ function resetAll() {
 }
 
 // -----------------------------
-// GLOBAL STATE
-// -----------------------------
-let globalData = [];
-let categoryMap = {};
-
-// -----------------------------
 // INITIAL LOAD
 // -----------------------------
 async function init() {
@@ -231,17 +275,43 @@ async function init() {
     const [data, cats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
-    // convert categories.json into { lowerKey : {display:"Correct Caps", subcategories:[...] } }
-    const normalized = {};
-    for (const key in cats) {
-        const lower = key.toLowerCase();
-        normalized[lower] = {
-            display: key,
-            subcategories: cats[key]
-        };
-    }
+    // Expecting categories.json structure:
+    // {
+    //   "categories": ["Children, Youth & Family Services", ...],
+    //   "subcategories": {
+    //       "Children, Youth & Family Services": ["Developmental Delay", "Hiv Services", ...],
+    //       ...
+    //   }
+    // }
+    const rawCategories = cats && Array.isArray(cats.categories) ? cats.categories : [];
+    const rawSubcategories = cats && cats.subcategories ? cats.subcategories : {};
 
-    categoryMap = normalized;
+    // Build categoryOptions and subcategoryOptions with normalized values
+    categoryOptions = [];
+    subcategoryOptions = {};
+
+    rawCategories.forEach(catLabel => {
+        if (!catLabel || typeof catLabel !== "string") return;
+        const labelTrimmed = catLabel.trim();
+        const valueLower = labelTrimmed.toLowerCase();
+
+        categoryOptions.push({
+            label: labelTrimmed,
+            value: valueLower
+        });
+
+        const subs = Array.isArray(rawSubcategories[catLabel])
+            ? rawSubcategories[catLabel]
+            : [];
+
+        subcategoryOptions[valueLower] = subs.map(subLabel => {
+            const raw = String(subLabel || "").trim();
+            return {
+                value: raw.toLowerCase(),
+                label: formatSubcategoryLabel(raw)
+            };
+        });
+    });
 
     populateCategoryFilter();
     resetSubcategoryFilter();
