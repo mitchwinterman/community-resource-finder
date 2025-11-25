@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Admin Panel — Community Resources</title>
+    <link rel="stylesheet" href="admin.css" />
+</head>
+
+<body>
+
+    <div id="login-screen" class="screen">
+        <h1>Admin Login</h1>
+        <input id="email" type="email" placeholder="Email" />
+        <input id="password" type="password" placeholder="Password" />
+        <button id="loginBtn">Log In</button>
+        <div id="login-error"></div>
+    </div>
+
+    <div id="admin-screen" class="screen hidden">
+
+        <div class="topbar">
+            <h2>Admin Dashboard</h2>
+            <button id="logoutBtn">Log Out</button>
+        </div>
+
+        <div class="nav">
+            <button class="nav-btn" data-panel="resources">Edit Resources</button>
+            <button class="nav-btn" data-panel="categories">Edit Categories</button>
+        </div>
+
+        <!-- RESOURCES PANEL -->
+        <div id="panel-resources" class="panel hidden">
+
+            <h3>Resource List</h3>
+            <button id="add-resource-btn">+ Add New Resource</button>
+
+            <div id="resource-list"></div>
+
+            <div id="resource-editor" class="editor hidden">
+                <h3 id="editor-title">Edit Resource</h3>
+                <div id="resource-form"></div>
+                <button id="save-resource-btn">Save</button>
+                <button id="delete-resource-btn">Delete</button>
+                <button id="cancel-resource-btn">Cancel</button>
+            </div>
+
+        </div>
+
+        <!-- CATEGORIES PANEL -->
+        <div id="panel-categories" class="panel hidden">
+            <h3>Categories</h3>
+
+            <button id="add-category-btn">+ Add Category</button>
+            <div id="category-list"></div>
+
+            <div id="category-editor" class="editor hidden">
+                <h3 id="category-editor-title"></h3>
+                <input id="category-name-input" placeholder="Category Name" />
+
+                <h4>Subcategories</h4>
+                <div id="subcategory-list"></div>
+                <button id="add-sub-btn">+ Add Subcategory</button>
+
+                <button id="save-category-btn">Save Category</button>
+                <button id="delete-category-btn">Delete Category</button>
+                <button id="cancel-category-btn">Cancel</button>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script type="module" src="admin.js"></script>
+</body>
+</html>
