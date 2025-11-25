@@ -77,7 +77,7 @@ function formatSubcategoryLabel(label) {
         return specialSubcategoryCaps[lower];
     }
 
-    // 2. Simple fallback capitalization
+    // 2. Simple fallback: return original label
     return label;
 }
 
@@ -87,7 +87,15 @@ function escapeRegExp(string) {
 
 function renderResults(resources) {
     resultsDiv.innerHTML = '';
-    detailsDiv.innerHTML = '<div style="text-align:center; color:#666;">Select a resource<br><small>Use the search bar or filters above to find a resource, then click to view full details.</small></div>';
+    
+    // RESET DETAILS PANEL TO INSTRUCTIONS (No Auto-Select)
+    detailsDiv.innerHTML = `
+        <div style="text-align:center; color:#666;">
+            Select a resource<br>
+            <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
+        </div>
+    `;
+    
     selectedResourceId = null;
 
     if (resources.length === 0) {
@@ -108,10 +116,20 @@ function renderResults(resources) {
 }
 
 function showDetails(resource) {
-    // Highlight selected card
+    // Highlight selected card logic
     const cards = document.querySelectorAll('.result-card');
-    cards.forEach(c => c.style.borderLeft = "none");
-    // (Optional: add visual selection logic here if desired, or rely on CSS :focus)
+    cards.forEach(card => {
+        // Reset all styles
+        card.style.background = "#f7f9ff";
+        card.style.borderLeft = "none";
+        
+        // Highlight matched card
+        const title = card.querySelector('.card-title').innerText;
+        if (title === resource.Organization) {
+            card.style.background = "#eef2ff";
+            card.style.borderLeft = "4px solid #6a7cff";
+        }
+    });
 
     const website = resource.Website ? String(resource.Website).trim() : "";
     const websiteHref = website
@@ -206,7 +224,7 @@ function resetAll() {
 }
 
 // ------------------------------------
-// MAIN FILTERING FUNCTION (FIXED)
+// MAIN FILTERING FUNCTION
 // ------------------------------------
 function applyFilters() {
     const searchTerm = (searchInput.value || "").trim().toLowerCase();
@@ -230,12 +248,10 @@ function applyFilters() {
         }
 
         // 2. CATEGORY FILTER (REGEX FIX)
-        // We use Regex to look for the phrase match, accounting for boundaries (commas or start/end of string).
-        // This solves the issue where splitting by "," broke categories like "Employment, Education & Financial Assistance".
+        // Uses Regex to handle categories with commas inside them (e.g. "Employment, Education...")
         if (categoryFilter !== 'all') {
             const escapedCat = escapeRegExp(categoryFilter);
-            // Regex reads: "Start of string OR comma", followed by whitespace (optional), 
-            // followed by our exact category name, followed by whitespace (optional), "comma OR end of string"
+            // Regex matches: Start-of-string OR comma, then whitespace, then category, then whitespace, then comma OR end-of-string
             const regex = new RegExp(`(?:^|,)\\s*${escapedCat}\\s*(?:,|$)`, 'i');
             
             if (!regex.test(resource.Categories)) {
@@ -244,7 +260,6 @@ function applyFilters() {
         }
 
         // 3. SUBCATEGORY FILTER (REGEX FIX)
-        // Applied same logic here for safety
         if (subcategoryFilter !== 'all') {
             const escapedSub = escapeRegExp(subcategoryFilter);
             const regex = new RegExp(`(?:^|,)\\s*${escapedSub}\\s*(?:,|$)`, 'i');
