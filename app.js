@@ -36,272 +36,274 @@ const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
 
 // -----------------------------
-// ERROR HANDLER
+// GLOBAL STATE
 // -----------------------------
-function showError(message) {
-    resultsDiv.innerHTML = `<div class="result-card">${message}</div>`;
+let globalData = [];
+let categoryOptions = [];      // [{ value: "children, youth & family services", label: "Children, Youth & Family Services" }, ...]
+let subcategoryOptions = {};   // { "children, youth & family services": [{ value, label }, ...] }
+let selectedResourceId = null;
+
+// -----------------------------
+// HELPER FUNCTIONS
+// -----------------------------
+
+// --- FIX FOR ISSUE 2: Capitalization ---
+// Expanded list to catch acronyms when they are part of a longer phrase.
+const specialSubcategoryCaps = {
+    "aba": "ABA",
+    "foster care": "Foster Care",
+    "hiv": "HIV",
+    "hiv services": "HIV Services",
+    "hiv testing": "HIV Testing", // ADDED
+    "hud-vash": "HUD-VASH",
+    "snap/food stamps": "SNAP/Food Stamps",
+    "psyc": "PSYC",
+    "psychosocial rehab (psr)": "Psychosocial Rehab (PSR)",
+    "ssdi": "SSDI",
+    "ssdi benefits": "SSDI Benefits", // ADDED
+    "ssi": "SSI",
+    "ssi eligibility": "SSI Eligibility", // ADDED
+    "tanf": "TANF",
+    "wic": "WIC",
+    "lgbtq+": "LGBTQ+",
+    "lgbtqia+": "LGBTQIA+"
+};
+
+function formatSubcategoryLabel(label) {
+    const lower = label.toLowerCase();
+    
+    // 1. Check if the entire lowercase label is in the special caps map
+    if (specialSubcategoryCaps[lower]) {
+        return specialSubcategoryCaps[lower];
+    }
+
+    // 2. Fallback to title-casing logic (assuming standard Title Case function is present or similar)
+    // NOTE: If you have a title-case function, it should be here. 
+    // For simplicity and based on context, we assume a basic capitalization for non-special cases:
+    if (label && typeof label === 'string') {
+        return label.split(' ').map(word => {
+            if (word.length > 0) {
+                return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+            }
+            return '';
+        }).join(' ');
+    }
+
+    return label;
 }
 
-// -----------------------------
-// RENDERING FUNCTIONS
-// -----------------------------
-function renderList(data) {
-    resultsDiv.innerHTML = "";
+function renderResults(resources) {
+    resultsDiv.innerHTML = '';
+    detailsDiv.innerHTML = '<small>Select a resource from the list to view its details.</small>';
+    selectedResourceId = null;
 
-    if (!data || data.length === 0) {
-        resultsDiv.innerHTML = `<div class="result-card">No results found.</div>`;
+    if (resources.length === 0) {
+        resultsDiv.innerHTML = '<div class="no-results">No resources found matching the current filters.</div>';
         return;
     }
 
-    data.forEach(item => {
-        const card = document.createElement("div");
-        card.className = "result-card";
+    resources.forEach(resource => {
+        const card = document.createElement('div');
+        card.className = 'result-card';
         card.innerHTML = `
-            <div><strong>${item.Organization || "No name"}</strong></div>
-            <div>${item.Description || ""}</div>
+            <div class="card-title">${resource.Organization}</div>
+            <div class="card-description">${resource.Description}</div>
         `;
-        card.onclick = () => renderDetails(item);
+        card.onclick = () => showDetails(resource);
         resultsDiv.appendChild(card);
     });
+
+    // Automatically select the first resource if none is selected
+    if (resources.length > 0) {
+        showDetails(resources[0]);
+    }
 }
 
-function renderDetails(item) {
-    const website = item.Website ? String(item.Website).trim() : "";
-    const websiteHref = website
-        ? (website.startsWith("http") ? website : "https://" + website)
-        : "";
+function showDetails(resource) {
+    selectedResourceId = resource.Organization; // Using Organization as unique ID
+    
+    // Deselect previous card and select current
+    document.querySelectorAll('.result-card').forEach(card => card.classList.remove('selected'));
+    const currentCard = Array.from(resultsDiv.querySelectorAll('.result-card')).find(card => 
+        card.querySelector('.card-title').textContent === resource.Organization
+    );
+    if (currentCard) {
+        currentCard.classList.add('selected');
+    }
 
     detailsDiv.innerHTML = `
-        <div class="details-title">${item.Organization || "No name"}</div>
+        <h2 class="details-title">${resource.Organization}</h2>
+        <p class="details-section">${resource.Description}</p>
+        
+        <div class="details-row">
+            <div><strong>Categories:</strong> ${resource.Categories}</div>
+            <div><strong>Subcategories:</strong> ${resource.Subcategories}</div>
+        </div>
 
-        <div class="details-field"><strong>Description:</strong> ${item.Description || ""}</div>
-        <div class="details-field"><strong>Address:</strong> ${item.Address || ""}</div>
-        <div class="details-field"><strong>City:</strong> ${item.City || ""}</div>
-        <div class="details-field"><strong>Zip:</strong> ${item.Zip || ""}</div>
-        <div class="details-field"><strong>Phone:</strong> ${item.Phone || ""}</div>
-        <div class="details-field"><strong>Email:</strong> ${item.Email || ""}</div>
+        <div class="details-row">
+            <div><strong>Phone:</strong> ${resource.Phone || 'N/A'}</div>
+            <div><strong>Email:</strong> ${resource.Email || 'N/A'}</div>
+        </div>
 
-        <div class="details-field"><strong>Website:</strong> ${
-            websiteHref ? `<a href="${websiteHref}" target="_blank" rel="noopener noreferrer">${website}</a>` : ""
-        }</div>
-
-        <div class="details-field"><strong>Categories:</strong> ${item.Categories || ""}</div>
-        <div class="details-field"><strong>Subcategories:</strong> ${item.Subcategories || ""}</div>
-
-        <div class="details-field"><strong>Eligibility:</strong> ${item.Eligibility || ""}</div>
-        <div class="details-field"><strong>Hours:</strong> ${item.Hours || ""}</div>
-        <div class="details-field"><strong>Cost:</strong> ${item.Cost || ""}</div>
-        <div class="details-field"><strong>Last Verified:</strong> ${item["Last Verified"] || ""}</div>
-        <div class="details-field"><strong>Keywords:</strong> ${item.Keywords || ""}</div>
-        <div class="details-field"><strong>Notes:</strong> ${item.Notes || ""}</div>
+        <div><strong>Address:</strong> ${resource.Address ? `${resource.Address}, ${resource.City}` : 'N/A'}</div>
+        
+        ${resource.Website ? `<div><a href="${resource.Website}" target="_blank" class="details-link">Visit Website</a></div>` : ''}
+        
+        <p class="details-section"><strong>Hours:</strong> ${resource.Hours || 'Varies'}</p>
+        <p class="details-section"><strong>Eligibility:</strong> ${resource.Eligibility || 'None specified'}</p>
+        <p class="details-section"><strong>Cost:</strong> ${resource.Cost || 'None specified'}</p>
+        <p class="details-section"><strong>Notes:</strong> ${resource.Notes || 'None'}</p>
+        <p class="details-small">Last Verified: ${resource['Last Verified'] || 'N/A'}</p>
     `;
 }
 
-// -----------------------------
-// HELPERS
-// -----------------------------
-function normalizeToken(str) {
-    return String(str)
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, " ");
+function showError(message) {
+    resultsDiv.innerHTML = `<div class="error">${message}</div>`;
 }
 
-const ACRONYMS = new Set(["ent", "hiv", "std", "ssdi", "ssi", "wic", "snap", "lgbtq"]);
 
-function formatLabel(label) {
-    if (!label) return "";
-    const s = String(label);
-
-    // Split into words and separators (spaces, /, &, ,)
-    return s.split(/(\s+|\/|&|,)/).map(part => {
-        // Keep separators as-is
-        if (/^\s+$/.test(part) || part === "/" || part === "&" || part === ",") {
-            return part;
-        }
-
-        // Strip non-letters for acronym check
-        const lettersOnly = part.replace(/[^a-z]/gi, "").toLowerCase();
-        if (ACRONYMS.has(lettersOnly)) {
-            // Uppercase only letters, keep any trailing punctuation
-            const letters = part.replace(/[^a-z]/gi, "").toUpperCase();
-            const rest = part.slice(letters.length);
-            return letters + rest;
-        }
-
-        // Default: keep original casing from JSON
-        return part;
-    }).join("");
+function populateCategoryFilter() {
+    categorySelect.innerHTML = '<option value="all">All categories</option>';
+    categoryOptions.forEach(option => {
+        const opt = document.createElement('option');
+        opt.value = option.value;
+        opt.textContent = option.label;
+        categorySelect.appendChild(opt);
+    });
 }
 
-function buildHaystack(item) {
-    const copy = { ...item };
-    delete copy.UpdatedBy; // not searchable
-
-    return Object.values(copy)
-        .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
-        .join(" | ")
-        .toLowerCase();
-}
-
-function parseCsvField(value) {
-    if (!value) return [];
-    return String(value)
-        .split(",")
-        .map(v => v.trim())
-        .filter(v => v.length > 0);
-}
-
-// -----------------------------
-// FILTERING
-// -----------------------------
-function applyFilters() {
-    if (!Array.isArray(globalData)) {
-        renderList([]);
-        return;
+function populateSubcategoryFilterForCategory(categoryValue) {
+    subcategorySelect.innerHTML = '<option value="all">All subcategories</option>';
+    subcategorySelect.disabled = (categoryValue === 'all');
+    
+    if (categoryValue !== 'all' && subcategoryOptions[categoryValue]) {
+        subcategoryOptions[categoryValue].forEach(option => {
+            const opt = document.createElement('option');
+            opt.value = option.value;
+            opt.textContent = option.label;
+            subcategorySelect.appendChild(opt);
+        });
     }
+    // Set selection back to 'all' if the current selected sub is no longer available
+    if (subcategorySelect.value !== 'all' && !subcategoryOptions[categoryValue].find(o => o.value === subcategorySelect.value)) {
+        subcategorySelect.value = 'all';
+    }
+}
 
-    const keyword = (searchInput.value || "").trim().toLowerCase();
-    const selectedCategory = categorySelect.value;   // "all" or normalized category key
-    const selectedSub = subcategorySelect.value;     // "all" or normalized subcategory key
+function resetSubcategoryFilter() {
+    subcategorySelect.value = 'all';
+    subcategorySelect.innerHTML = '<option value="all">All subcategories</option>';
+    subcategorySelect.disabled = true;
+}
 
-    const filtered = globalData.filter(item => {
-        const itemCats = parseCsvField(item.Categories).map(normalizeToken);
-        const itemSubs = parseCsvField(item.Subcategories).map(normalizeToken);
+function resetAll() {
+    searchInput.value = '';
+    categorySelect.value = 'all';
+    resetSubcategoryFilter();
+    applyFilters();
+}
 
-        // Category filter
-        if (selectedCategory !== "all" && !itemCats.includes(selectedCategory)) {
-            return false;
+// ------------------------------------
+// MAIN FILTERING FUNCTION
+// ------------------------------------
+function applyFilters() {
+    const searchTerm = searchInput.value.toLowerCase();
+    const categoryFilter = categorySelect.value;
+    const subcategoryFilter = subcategorySelect.value;
+    
+    let filteredData = globalData.filter(resource => {
+        // 1. SEARCH FILTER
+        if (searchTerm) {
+            const searchFields = [
+                resource.Organization,
+                resource.Description,
+                resource.Categories,
+                resource.Subcategories,
+                resource.Keywords
+            ].join(' ').toLowerCase();
+
+            if (!searchFields.includes(searchTerm)) {
+                return false;
+            }
         }
 
-        // Subcategory filter
-        if (selectedSub !== "all" && !itemSubs.includes(selectedSub)) {
-            return false;
+        // 2. CATEGORY FILTER (FIX FOR ISSUE 1: Robust Category Match)
+        if (categoryFilter !== 'all') {
+            // Normalize the resource's category string into an array of lowercased, trimmed category names
+            const resourceCategories = resource.Categories
+                .split(',')
+                .map(c => c.trim().toLowerCase());
+
+            // Check if the selected category value is an exact match in the resource's array
+            if (!resourceCategories.includes(categoryFilter)) {
+                return false;
+            }
         }
 
-        // Full text search
-        if (keyword && !buildHaystack(item).includes(keyword)) {
-            return false;
+        // 3. SUBCATEGORY FILTER
+        if (subcategoryFilter !== 'all') {
+            // Normalize the resource's subcategory string into an array of lowercased, trimmed subcategory names
+            const resourceSubcategories = resource.Subcategories
+                .split(',')
+                .map(s => s.trim().toLowerCase());
+
+            // Check if the selected subcategory value is an exact match
+            if (!resourceSubcategories.includes(subcategoryFilter)) {
+                return false;
+            }
         }
 
         return true;
     });
 
-    renderList(filtered);
+    renderResults(filteredData);
 }
 
 // -----------------------------
-// FILTER POPULATION
-// -----------------------------
-
-// Clears subcategory dropdown back to "All subcategories" and disables it
-function resetSubcategoryFilter() {
-    subcategorySelect.innerHTML = `<option value="all">All subcategories</option>`;
-    subcategorySelect.disabled = true;
-}
-
-// Populates category dropdown using labels from categories.json,
-// but uses normalized lowercase values internally for matching.
-function populateCategoryFilter() {
-    while (categorySelect.options.length > 1) {
-        categorySelect.remove(1);
-    }
-
-    // categoryOptions array already sorted by label
-    categoryOptions.forEach(cat => {
-        const opt = document.createElement("option");
-        opt.value = cat.value;       // normalized lowercase key
-        opt.textContent = cat.label; // exact casing from JSON
-        categorySelect.appendChild(opt);
-    });
-}
-
-// Populates subcategory dropdown for the given normalized lowercase category key
-function populateSubcategoryFilterForCategory(categoryLower) {
-    resetSubcategoryFilter();
-
-    if (!categoryLower || categoryLower === "all") return;
-
-    const subs = subcategoryMap[categoryLower] || [];
-
-    subs.forEach(sub => {
-        const opt = document.createElement("option");
-        opt.value = sub.value;       // normalized lowercase
-        opt.textContent = sub.label; // formatted label (HIV, SSI, SSDI, ENT, etc.)
-        subcategorySelect.appendChild(opt);
-    });
-
-    if (subs.length > 0) {
-        subcategorySelect.disabled = false;
-    }
-}
-
-// -----------------------------
-// RESET BUTTON
-// -----------------------------
-function resetAll() {
-    // Clear search and filters
-    searchInput.value = "";
-    categorySelect.value = "all";
-    resetSubcategoryFilter();
-
-    // Restore default details panel message
-    detailsDiv.innerHTML = `
-        <div style="text-align:center; color:#666;">
-            Select a resource<br>
-            <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
-        </div>
-    `;
-
-    // Re-render full list
-    applyFilters();
-}
-
-// -----------------------------
-// GLOBAL STATE
-// -----------------------------
-let globalData = [];
-
-// categoryOptions: [{ value: normalizedKey, label: "Health & Medical" }, ...]
-let categoryOptions = [];
-
-// subcategoryMap: { normalizedCategoryKey: [ { value:"ssdi", label:"SSDI" }, ... ] }
-let subcategoryMap = {};
-
-// -----------------------------
-// INITIAL LOAD
+// INIT
 // -----------------------------
 async function init() {
-    resultsDiv.innerHTML = `<div class="result-card">Loading…</div>`;
+    // Load Data
+    globalData = await loadData();
+    if (globalData.length === 0) return;
 
-    const [data, cats] = await Promise.all([loadData(), loadCategories()]);
-    globalData = Array.isArray(data) ? data : [];
+    // Load Categories & Subcategories
+    const rawData = await loadCategories();
+    const rawCategories = Array.isArray(rawData.categories) ? rawData.categories : [];
+    const rawSubcategories = rawData.subcategories || rawData; // Support older/simpler JSON structure
 
-    // Build categoryOptions and subcategoryMap from categories.json
+    // Build categoryOptions and subcategoryOptions with normalized values
     categoryOptions = [];
-    subcategoryMap = {};
+    subcategoryOptions = {};
 
-    Object.entries(cats || {}).forEach(([catLabel, subList]) => {
-        const catKey = normalizeToken(catLabel);
+    // Get a unique list of category labels to iterate over, either from rawCategories (if simple array) 
+    // or from the keys of rawSubcategories (if it's the full JSON object)
+    const categoryLabels = rawCategories.length > 0 ? rawCategories : Object.keys(rawSubcategories);
 
-        // Store category option
+    categoryLabels.forEach(catLabel => {
+        if (!catLabel || typeof catLabel !== "string") return;
+        const labelTrimmed = catLabel.trim();
+        const valueLower = labelTrimmed.toLowerCase();
+
         categoryOptions.push({
-            value: catKey,
-            label: catLabel
+            label: labelTrimmed,
+            value: valueLower
         });
 
-        // Store subcategories for this category
-        const subsArray = Array.isArray(subList) ? subList : [];
-        subcategoryMap[catKey] = subsArray
-            .map(subLabel => ({
-                value: normalizeToken(subLabel),
-                label: formatLabel(subLabel)
-            }))
-            .sort((a, b) => a.label.localeCompare(b.label));
-    });
+        // Get subcategories for the current category label
+        const subs = Array.isArray(rawSubcategories[catLabel])
+            ? rawSubcategories[catLabel]
+            : [];
 
-    // Sort categories alphabetically by label
-    categoryOptions.sort((a, b) => a.label.localeCompare(b.label));
+        // Build normalized subcategory list
+        subcategoryOptions[valueLower] = subs.map(subLabel => {
+            const raw = String(subLabel || "").trim();
+            return {
+                value: raw.toLowerCase(),
+                label: formatSubcategoryLabel(raw)
+            };
+        });
+    });
 
     populateCategoryFilter();
     resetSubcategoryFilter();
@@ -314,8 +316,7 @@ async function init() {
 searchInput.addEventListener("input", applyFilters);
 
 categorySelect.addEventListener("change", () => {
-    const catKey = categorySelect.value; // normalized key or "all"
-    populateSubcategoryFilterForCategory(catKey);
+    populateSubcategoryFilterForCategory(categorySelect.value);
     applyFilters();
 });
 
