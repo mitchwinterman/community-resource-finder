@@ -35,6 +35,24 @@ h1 {
     color: #555;
 }
 
+/* TOP LINKS (ADMIN ENTRYPOINT) */
+.top-links {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 10px;
+}
+
+.admin-link {
+    font-size: 13px;
+    color: #888;
+    text-decoration: none;
+}
+
+.admin-link:hover {
+    color: #555;
+    text-decoration: underline;
+}
+
 /* INPUT + FILTERS */
 .search-row {
     display: flex;
@@ -119,22 +137,6 @@ select {
 .details-field {
     margin-bottom: 6px;
 }
-.top-links {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 10px;
-}
-
-.admin-link {
-    font-size: 13px;
-    color: #888;
-    text-decoration: none;
-}
-
-.admin-link:hover {
-    color: #555;
-    text-decoration: underline;
-}
 
 /* MOBILE */
 @media (max-width: 900px) {
@@ -152,6 +154,7 @@ select {
         min-height: auto;
     }
 }
+
 .reset-btn {
     padding: 14px 18px;
     border-radius: 10px;
@@ -167,4 +170,3 @@ select {
 .reset-btn:hover {
     background: #c7d0ff;
 }
-
