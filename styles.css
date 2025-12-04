@@ -119,6 +119,22 @@ select {
 .details-field {
     margin-bottom: 6px;
 }
+.top-links {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 10px;
+}
+
+.admin-link {
+    font-size: 13px;
+    color: #888;
+    text-decoration: none;
+}
+
+.admin-link:hover {
+    color: #555;
+    text-decoration: underline;
+}
 
 /* MOBILE */
 @media (max-width: 900px) {
