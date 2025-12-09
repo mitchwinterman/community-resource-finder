@@ -25,7 +25,7 @@ body {
     gap: 24px;
 }
 
-/* HEADER LAYOUT */
+/* HEADER LAYOUT: [CRF pill] [nav] [WCLS logo] */
 .app-header {
     display: grid;
     grid-template-columns: auto 1fr auto;
@@ -33,17 +33,14 @@ body {
     gap: 24px;
 }
 
-/* WCLS LOGO TOP-LEFT — LARGER */
-.wcls-link {
+/* Brand pill link (CRF) on left */
+.brand-home-link {
+    text-decoration: none;
+    color: inherit;
     display: inline-flex;
-    align-items: center;
-}
-.logo-wcls {
-    height: 100px;
-    width: auto;
 }
 
-/* CENTERED CRF BRAND WITH COLORED PILL BEHIND LOGO */
+/* CRF pill */
 .brand-home {
     display: inline-flex;
     align-items: center;
@@ -53,7 +50,7 @@ body {
     border-radius: 999px;
     background: radial-gradient(circle at top left, #e0f2ff 0, #f4f8ff 55%, #ffffff 100%);
     box-shadow: 0 10px 22px rgba(15, 23, 42, 0.14);
-    margin: 0 auto;
+    margin: 0;
     cursor: pointer;
 }
 
@@ -91,10 +88,20 @@ h1 {
     max-width: 620px;
 }
 
-/* SMALL HEADER NAV (now empty but kept for layout) */
+/* SMALL HEADER NAV (middle column, currently empty) */
 .header-nav {
     display: flex;
+    justify-content: center;
+}
+
+/* WCLS LOGO on the right */
+.wcls-link {
+    display: inline-flex;
     justify-content: flex-end;
+}
+.logo-wcls {
+    height: 100px;
+    width: auto;
 }
 
 /* SEARCH + FILTERS */
@@ -406,6 +413,10 @@ select:focus {
         grid-template-columns: 1fr;
         row-gap: 14px;
         justify-items: center;
+    }
+
+    .brand-home-link {
+        justify-content: center;
     }
 
     .wcls-link {
