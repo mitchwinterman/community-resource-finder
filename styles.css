@@ -29,9 +29,17 @@ h1 {
     margin-bottom: 10px;
 }
 
+.app-title {
+    cursor: pointer;
+}
+
+.app-title:hover {
+    color: #3b4bb2;
+}
+
 .subtitle {
     font-size: 15px;
-    margin-bottom: 30px;
+    margin-bottom: 20px;
     color: #555;
 }
 
@@ -87,6 +95,13 @@ select {
     background: white;
 }
 
+/* RESULT COUNT */
+.result-count {
+    font-size: 13px;
+    color: #555;
+    margin-bottom: 8px;
+}
+
 /* MASTER-DETAIL SPLIT */
 .content-split {
     display: flex;
@@ -138,6 +153,23 @@ select {
     margin-bottom: 6px;
 }
 
+/* RESET BUTTON */
+.reset-btn {
+    padding: 14px 18px;
+    border-radius: 10px;
+    border: none;
+    background: #dde3ff;
+    color: #333;
+    font-size: 16px;
+    cursor: pointer;
+    transition: 0.2s;
+    white-space: nowrap;
+}
+
+.reset-btn:hover {
+    background: #c7d0ff;
+}
+
 /* MOBILE */
 @media (max-width: 900px) {
     .content-split {
@@ -153,20 +185,4 @@ select {
         width: 100%;
         min-height: auto;
     }
-}
-
-.reset-btn {
-    padding: 14px 18px;
-    border-radius: 10px;
-    border: none;
-    background: #dde3ff;
-    color: #333;
-    font-size: 16px;
-    cursor: pointer;
-    transition: 0.2s;
-    white-space: nowrap;
-}
-
-.reset-btn:hover {
-    background: #c7d0ff;
 }
