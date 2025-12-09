@@ -6,7 +6,7 @@ body {
 }
 
 .screen {
-    padding: 32px 40px;
+    padding: 28px 40px 26px;
 }
 
 .hidden {
@@ -52,7 +52,7 @@ body {
     justify-content: space-between;
     align-items: center;
     background: #ffffff;
-    padding: 10px 18px;
+    padding: 8px 16px;
     border-radius: 14px;
     box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
 }
@@ -60,17 +60,32 @@ body {
 .topbar-left {
     display: flex;
     align-items: center;
+    gap: 10px;
 }
 
-.topbar-brand {
-    display: flex;
+.topbar-wcls-link {
+    display: inline-flex;
     align-items: center;
-    gap: 10px;
+}
+
+.logo-wcls-small {
+    height: 44px;
+    width: auto;
+}
+
+.topbar-crf-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     text-decoration: none;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: radial-gradient(circle at top left, #e0f2ff 0, #f4f8ff 55%, #ffffff 100%);
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
 }
 
 .logo-crf-small {
-    height: 44px;
+    height: 40px;
     width: auto;
 }
 
@@ -80,13 +95,13 @@ body {
 }
 
 .topbar-title {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 700;
     color: #102a43;
 }
 
 .topbar-subtitle {
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: #6b7280;
@@ -95,25 +110,6 @@ body {
 .topbar-right {
     display: flex;
     align-items: center;
-    gap: 14px;
-}
-
-.topbar-meta {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.powered-by-label {
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #6b7280;
-}
-
-.logo-wcls-small {
-    height: 30px;
-    width: auto;
 }
 
 #logoutBtn {
@@ -131,7 +127,7 @@ body {
 
 /* NAV */
 .nav {
-    margin-top: 20px;
+    margin-top: 18px;
 }
 .nav-btn {
     padding: 9px 14px;
@@ -260,6 +256,34 @@ body {
     min-height: 90px;
 }
 
+/* CHECKBOX GROUPS */
+.checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    padding: 6px 4px 2px;
+    border-radius: 8px;
+    background: #eef2ff;
+}
+
+.checkbox-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #ffffff;
+    border: 1px solid #cbd5f5;
+    font-size: 12px;
+}
+
+.checkbox-pill input {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    border: none;
+}
+
 /* ACTION BUTTONS */
 .editor-actions {
     margin-top: 16px;
@@ -314,6 +338,27 @@ body {
     cursor: pointer;
 }
 
+/* FOOTER */
+.admin-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 18px;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.admin-footer a {
+    color: #2563eb;
+    text-decoration: none;
+}
+.admin-footer a:hover {
+    text-decoration: underline;
+}
+.footer-separator {
+    margin: 0 6px;
+}
+
 /* RESPONSIVE */
 @media (max-width: 900px) {
     .screen {
@@ -334,5 +379,11 @@ body {
     .admin-editor {
         width: 100%;
         max-height: none;
+    }
+
+    .admin-footer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
     }
 }
