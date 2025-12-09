@@ -10,7 +10,7 @@
 <body>
     <div class="wrapper">
 
-        <h1>Community Resource Finder</h1>
+        <h1 id="app-title" class="app-title">Community Resource Finder</h1>
         <div class="subtitle">
             Browse, search, and filter Resources from the Washoe County Library's Community Resources Guide
         </div>
@@ -56,8 +56,11 @@
         <div class="content-split">
 
             <!-- Results list -->
-            <div id="results" class="results-panel">
-                Loading…
+            <div class="results-panel">
+                <div id="resultCount" class="result-count"></div>
+                <div id="results">
+                    Loading…
+                </div>
             </div>
 
             <!-- Details panel -->
@@ -72,36 +75,7 @@
 
     </div>
 
-    <!-- Firebase init (CDN, module) -->
-    <script type="module">
-        // Import Firebase SDKs from CDN (v12.6.0 as in your snippet)
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
-        import { getFirestore } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-firestore.js";
-        import { getAuth } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-auth.js";
-
-        // Your web app's Firebase configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyAGd-wAWcMG2mrzwPBLgvOrmPWmwY7isok",
-            authDomain: "washoe-community-resources.firebaseapp.com",
-            projectId: "washoe-community-resources",
-            storageBucket: "washoe-community-resources.firebasestorage.app",
-            messagingSenderId: "788386726804",
-            appId: "1:788386726804:web:d069f55e96a5d196b38581",
-            measurementId: "G-8BC3DJ5RWH"
-        };
-
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-
-        // Expose to non-module scripts (like app.js)
-        window.firebaseApp = app;
-        window.firebaseDb = db;
-        window.firebaseAuth = auth;
-    </script>
-
-    <!-- Your existing app logic (still a classic script) -->
-    <script src="app.js"></script>
+    <!-- Frontend app (module) -->
+    <script type="module" src="app.js"></script>
 </body>
 </html>
