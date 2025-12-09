@@ -8,6 +8,7 @@
 
 <body>
 
+    <!-- LOGIN SCREEN -->
     <div id="login-screen" class="screen">
         <h1>Admin Login</h1>
         <input id="email" type="email" placeholder="Email" />
@@ -16,8 +17,10 @@
         <div id="login-error"></div>
     </div>
 
+    <!-- ADMIN SCREEN -->
     <div id="admin-screen" class="screen hidden">
 
+        <!-- TOP BAR -->
         <div class="topbar">
             <div class="topbar-left">
                 <a href="index.html" class="app-link">Community Resource Finder</a>
@@ -26,6 +29,7 @@
             <button id="logoutBtn">Log Out</button>
         </div>
 
+        <!-- NAV -->
         <div class="nav">
             <button class="nav-btn" data-panel="resources">Edit Resources</button>
             <button class="nav-btn" data-panel="categories">Edit Categories</button>
@@ -46,6 +50,7 @@
                     <div id="resource-editor" class="editor hidden">
                         <h3 id="editor-title">Edit Resource</h3>
                         <div id="resource-form"></div>
+
                         <div class="editor-actions">
                             <button id="save-resource-btn">Save</button>
                             <button id="delete-resource-btn">Delete</button>
