@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <title>Admin Panel — Community Resources</title>
+    <title>Admin Panel — Community Resource Finder</title>
     <link rel="stylesheet" href="admin.css" />
 </head>
 
@@ -23,10 +23,22 @@
         <!-- TOP BAR -->
         <div class="topbar">
             <div class="topbar-left">
-                <a href="index.html" class="app-link">Community Resource Finder</a>
-                <span class="admin-tag">Admin Panel</span>
+                <a href="index.html" class="topbar-brand">
+                    <img src="crf-logo.png" alt="Community Resource Finder logo" class="logo-crf-small" />
+                    <div class="topbar-text">
+                        <span class="topbar-title">Community Resource Finder</span>
+                        <span class="topbar-subtitle">Admin Panel</span>
+                    </div>
+                </a>
             </div>
-            <button id="logoutBtn">Log Out</button>
+
+            <div class="topbar-right">
+                <div class="topbar-meta">
+                    <span class="powered-by-label">A project of</span>
+                    <img src="wcls-logo.png" alt="Washoe County Library System logo" class="logo-wcls-small" />
+                </div>
+                <button id="logoutBtn">Log Out</button>
+            </div>
         </div>
 
         <!-- NAV -->
