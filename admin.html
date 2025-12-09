@@ -19,7 +19,10 @@
     <div id="admin-screen" class="screen hidden">
 
         <div class="topbar">
-            <h2>Admin Dashboard</h2>
+            <div class="topbar-left">
+                <a href="index.html" class="app-link">Community Resource Finder</a>
+                <span class="admin-tag">Admin Panel</span>
+            </div>
             <button id="logoutBtn">Log Out</button>
         </div>
 
@@ -31,39 +34,60 @@
         <!-- RESOURCES PANEL -->
         <div id="panel-resources" class="panel hidden">
 
-            <h3>Resource List</h3>
-            <button id="add-resource-btn">+ Add New Resource</button>
+            <div class="panel-header">
+                <h3>Resources</h3>
+                <button id="add-resource-btn">+ Add New Resource</button>
+            </div>
 
-            <div id="resource-list"></div>
+            <div class="admin-split">
+                <div class="admin-list" id="resource-list"></div>
 
-            <div id="resource-editor" class="editor hidden">
-                <h3 id="editor-title">Edit Resource</h3>
-                <div id="resource-form"></div>
-                <button id="save-resource-btn">Save</button>
-                <button id="delete-resource-btn">Delete</button>
-                <button id="cancel-resource-btn">Cancel</button>
+                <div class="admin-editor">
+                    <div id="resource-editor" class="editor hidden">
+                        <h3 id="editor-title">Edit Resource</h3>
+                        <div id="resource-form"></div>
+                        <div class="editor-actions">
+                            <button id="save-resource-btn">Save</button>
+                            <button id="delete-resource-btn">Delete</button>
+                            <button id="cancel-resource-btn">Cancel</button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
         </div>
 
         <!-- CATEGORIES PANEL -->
         <div id="panel-categories" class="panel hidden">
-            <h3>Categories</h3>
 
-            <button id="add-category-btn">+ Add Category</button>
-            <div id="category-list"></div>
+            <div class="panel-header">
+                <h3>Categories</h3>
+                <button id="add-category-btn">+ Add Category</button>
+            </div>
 
-            <div id="category-editor" class="editor hidden">
-                <h3 id="category-editor-title"></h3>
-                <input id="category-name-input" placeholder="Category Name" />
+            <div class="admin-split">
+                <div class="admin-list" id="category-list"></div>
 
-                <h4>Subcategories</h4>
-                <div id="subcategory-list"></div>
-                <button id="add-sub-btn">+ Add Subcategory</button>
+                <div class="admin-editor">
+                    <div id="category-editor" class="editor hidden">
+                        <h3 id="category-editor-title">Edit Category</h3>
 
-                <button id="save-category-btn">Save Category</button>
-                <button id="delete-category-btn">Delete Category</button>
-                <button id="cancel-category-btn">Cancel</button>
+                        <div class="field-group">
+                            <label class="field-label" for="category-name-input">Category Name</label>
+                            <input id="category-name-input" placeholder="Category Name" />
+                        </div>
+
+                        <h4>Subcategories</h4>
+                        <div id="subcategory-list"></div>
+                        <button id="add-sub-btn">+ Add Subcategory</button>
+
+                        <div class="editor-actions">
+                            <button id="save-category-btn">Save Category</button>
+                            <button id="delete-category-btn">Delete Category</button>
+                            <button id="cancel-category-btn">Cancel</button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
         </div>
