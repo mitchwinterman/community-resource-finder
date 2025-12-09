@@ -46,6 +46,7 @@ const addResourceBtn = document.getElementById("add-resource-btn");
 const saveResourceBtn = document.getElementById("save-resource-btn");
 const deleteResourceBtn = document.getElementById("delete-resource-btn");
 const cancelResourceBtn = document.getElementById("cancel-resource-btn");
+const editorTitle = document.getElementById("editor-title");
 let editingResourceId = null;
 
 // Categories UI
@@ -60,7 +61,10 @@ const deleteCategoryBtn = document.getElementById("delete-category-btn");
 const cancelCategoryBtn = document.getElementById("cancel-category-btn");
 let editingCategoryId = null;
 
-// Small helper
+// Category metadata for resource editor
+let categoryMeta = [];
+
+// Small helpers
 function showElement(el) {
     el.classList.remove("hidden");
 }
@@ -97,11 +101,8 @@ logoutBtn.onclick = () => {
 };
 
 // Watch auth state and enforce admin role using Firestore "roles" collection.
-// Expected document path: roles/{uid} with a field "roles" equal to "admin"
-// or an array that includes "admin".
 onAuthStateChanged(auth, async user => {
     if (!user) {
-        // Not signed in: show login, hide admin
         hideElement(adminScreen);
         showElement(loginScreen);
         return;
@@ -132,7 +133,7 @@ onAuthStateChanged(auth, async user => {
             return;
         }
 
-        // At this point, the user is authenticated AND has the admin role.
+        // Authenticated AND has admin role
         loginError.textContent = "";
         hideElement(loginScreen);
         showElement(adminScreen);
@@ -168,6 +169,27 @@ navBtns.forEach(btn => {
 // ------------------------------------------------------
 // RESOURCE MANAGEMENT
 // ------------------------------------------------------
+
+// Canonical field order for resource editor
+const RESOURCE_FIELDS = [
+    "Organization",
+    "Description",
+    "Address",
+    "City",
+    "Zip",
+    "Phone",
+    "Email",
+    "Website",
+    "Categories",
+    "Subcategories",
+    "Eligibility",
+    "Hours",
+    "Cost",
+    "Last Verified",
+    "Keywords",
+    "Notes"
+];
+
 async function loadResources() {
     resourceList.innerHTML = "Loading…";
 
@@ -193,58 +215,183 @@ async function loadResources() {
     }
 }
 
+// Helpers for categories/subcategories for resource editor
+function getAllCategoryNames() {
+    return categoryMeta
+        .map(c => c.name)
+        .filter(name => name && typeof name === "string")
+        .sort((a, b) => a.localeCompare(b));
+}
+
+function getAllSubcategoryNames() {
+    const set = new Set();
+    categoryMeta.forEach(cat => {
+        (cat.subcategories || []).forEach(sub => {
+            const name = String(sub || "").trim();
+            if (name) set.add(name);
+        });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+function parseCommaString(value) {
+    if (!value) return new Set();
+    return new Set(
+        String(value)
+            .split(",")
+            .map(v => v.trim())
+            .filter(Boolean)
+    );
+}
+
+function createMultiSelect(fieldName, currentValue, options) {
+    const select = document.createElement("select");
+    select.multiple = true;
+    select.className = "resource-field";
+    select.dataset.field = fieldName;
+
+    const currentSet = parseCommaString(currentValue);
+
+    options.forEach(label => {
+        const option = document.createElement("option");
+        option.value = label;
+        option.textContent = label;
+        if (currentSet.has(label)) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    });
+
+    return select;
+}
+
+// Best-effort ISO date detection (YYYY-MM-DD)
+function looksLikeISODate(value) {
+    return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
+// Build labeled resource form for existing or new data
+function buildResourceForm(initialData) {
+    resourceForm.innerHTML = "";
+
+    const data = initialData || {};
+    const dataKeys = Object.keys(data);
+
+    const extraKeys = dataKeys.filter(k => !RESOURCE_FIELDS.includes(k));
+    const allKeys = [...RESOURCE_FIELDS, ...extraKeys];
+
+    allKeys.forEach(key => {
+        const value = data[key] ?? "";
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "field-group";
+
+        const label = document.createElement("label");
+        label.className = "field-label";
+        label.textContent = key;
+        wrapper.appendChild(label);
+
+        // Special handling based on field
+        if (key === "Categories") {
+            const select = createMultiSelect("Categories", value, getAllCategoryNames());
+            wrapper.appendChild(select);
+        } else if (key === "Subcategories") {
+            const select = createMultiSelect("Subcategories", value, getAllSubcategoryNames());
+            wrapper.appendChild(select);
+        } else if (key === "Last Verified") {
+            if (!value || looksLikeISODate(value)) {
+                const input = document.createElement("input");
+                input.type = "date";
+                input.className = "resource-field";
+                input.dataset.field = key;
+                if (looksLikeISODate(value)) {
+                    input.value = value.trim();
+                }
+                wrapper.appendChild(input);
+            } else {
+                const textarea = document.createElement("textarea");
+                textarea.className = "resource-field";
+                textarea.dataset.field = key;
+                textarea.value = value;
+                wrapper.appendChild(textarea);
+            }
+        } else if (key === "Email") {
+            const input = document.createElement("input");
+            input.type = "email";
+            input.className = "resource-field";
+            input.dataset.field = key;
+            input.value = value;
+            wrapper.appendChild(input);
+        } else if (key === "Phone") {
+            const input = document.createElement("input");
+            input.type = "tel";
+            input.className = "resource-field";
+            input.dataset.field = key;
+            input.value = value;
+            // loose pattern: digits and common punctuation, at least 7 chars
+            input.pattern = "[0-9()+\\-\\.\\s]{7,}";
+            input.title = "Use digits and standard phone punctuation (min 7 characters).";
+            wrapper.appendChild(input);
+        } else if (key === "Website") {
+            const input = document.createElement("input");
+            input.type = "url";
+            input.className = "resource-field";
+            input.dataset.field = key;
+            input.value = value;
+            wrapper.appendChild(input);
+        } else {
+            const textarea = document.createElement("textarea");
+            textarea.className = "resource-field";
+            textarea.dataset.field = key;
+            textarea.value = value;
+            wrapper.appendChild(textarea);
+        }
+
+        resourceForm.appendChild(wrapper);
+    });
+}
+
 function openResourceEditor(id, data) {
     editingResourceId = id;
+    editorTitle.textContent = "Edit Resource";
     showElement(resourceEditor);
 
-    resourceForm.innerHTML = "";
-    Object.keys(data).forEach(key => {
-        const input = document.createElement("textarea");
-        input.value = data[key] ?? "";
-        input.dataset.field = key;
-        input.placeholder = key;
-        input.className = "resource-field";
-        resourceForm.appendChild(input);
-    });
+    buildResourceForm(data);
 }
 
 addResourceBtn.onclick = () => {
     editingResourceId = null;
+    editorTitle.textContent = "Add Resource";
     showElement(resourceEditor);
-    resourceForm.innerHTML = "";
-
-    const fields = [
-        "Organization",
-        "Description",
-        "Address",
-        "City",
-        "Zip",
-        "Phone",
-        "Email",
-        "Website",
-        "Categories",
-        "Subcategories",
-        "Eligibility",
-        "Hours",
-        "Cost",
-        "Last Verified",
-        "Keywords",
-        "Notes"
-    ];
-
-    fields.forEach(f => {
-        const input = document.createElement("textarea");
-        input.placeholder = f;
-        input.dataset.field = f;
-        input.className = "resource-field";
-        resourceForm.appendChild(input);
-    });
+    buildResourceForm({});
 };
 
 saveResourceBtn.onclick = async () => {
+    const inputs = resourceForm.querySelectorAll(".resource-field");
+
+    // Basic HTML5 validity checks (email, url, tel pattern, date)
+    for (const el of inputs) {
+        if (typeof el.checkValidity === "function" && !el.checkValidity()) {
+            alert(`Please correct the ${el.dataset.field} field.`);
+            return;
+        }
+    }
+
     const obj = {};
-    resourceForm.querySelectorAll("textarea").forEach(t => {
-        obj[t.dataset.field] = t.value;
+    inputs.forEach(el => {
+        const field = el.dataset.field;
+        let value;
+
+        if (el.tagName === "SELECT" && el.multiple) {
+            const selected = [...el.selectedOptions]
+                .map(o => o.value.trim())
+                .filter(Boolean);
+            value = selected.join(", ");
+        } else {
+            value = el.value;
+        }
+
+        obj[field] = value;
     });
 
     try {
@@ -286,6 +433,7 @@ cancelResourceBtn.onclick = () => {
 // ------------------------------------------------------
 async function loadCategories() {
     categoryList.innerHTML = "Loading…";
+    categoryMeta = [];
 
     try {
         const querySnap = await getDocs(collection(db, "categories"));
@@ -293,10 +441,20 @@ async function loadCategories() {
 
         querySnap.forEach(docSnap => {
             const data = docSnap.data();
+            const rawName = (data.name || "").trim();
+            const displayName = rawName || "(No Category Name)";
+            const subs = Array.isArray(data.subcategories) ? data.subcategories : [];
+
+            categoryMeta.push({
+                id: docSnap.id,
+                name: rawName,
+                subcategories: subs
+            });
+
             const row = document.createElement("div");
             row.className = "list-row category-row";
-            row.textContent = data.name || "(No Category Name)";
-            row.onclick = () => openCategoryEditor(docSnap.id, data);
+            row.textContent = displayName;
+            row.onclick = () => openCategoryEditor(docSnap.id, { name: rawName, subcategories: subs });
             categoryList.appendChild(row);
         });
 
