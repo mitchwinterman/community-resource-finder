@@ -34,9 +34,10 @@ body {
     color: white;
     border: none;
     border-radius: 8px;
+    cursor: pointer;
 }
 
-/* ADMIN TOPBAR */
+/* TOPBAR */
 .topbar {
     display: flex;
     justify-content: space-between;
@@ -57,7 +58,6 @@ body {
     font-weight: 700;
     text-decoration: none;
     color: #333a55;
-    cursor: pointer;
 }
 
 .app-link:hover {
@@ -148,12 +148,11 @@ body {
     border-radius: 6px;
     cursor: pointer;
 }
-
 .list-row:hover {
     background: #dde4ff;
 }
 
-/* EDITOR */
+/* EDITOR CARD */
 .editor {
     margin-top: 0;
     padding: 20px;
@@ -166,6 +165,7 @@ body {
     margin-bottom: 15px;
 }
 
+/* FIELD GROUPS */
 .field-group {
     margin-bottom: 12px;
 }
@@ -183,7 +183,6 @@ body {
 .editor select {
     width: 100%;
     padding: 8px;
-    margin-bottom: 4px;
     border: 1px solid #ccd2e3;
     border-radius: 6px;
     font-size: 14px;
@@ -195,7 +194,7 @@ body {
 }
 
 .editor select[multiple] {
-    min-height: 80px;
+    min-height: 90px;
 }
 
 /* ACTION BUTTONS */
