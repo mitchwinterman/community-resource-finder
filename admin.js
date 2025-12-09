@@ -274,6 +274,38 @@ function looksLikeISODate(value) {
     return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
+// Build a checkbox group container
+function buildCheckboxGroup(fieldName, allValues, selectedSet) {
+    const container = document.createElement("div");
+    container.className = "resource-field checkbox-group";
+    container.dataset.field = fieldName;
+
+    allValues.forEach(name => {
+        const pill = document.createElement("label");
+        pill.className = "checkbox-pill";
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = name;
+        if (selectedSet.has(name)) input.checked = true;
+
+        const span = document.createElement("span");
+        span.textContent = name;
+
+        pill.appendChild(input);
+        pill.appendChild(span);
+        container.appendChild(pill);
+    });
+
+    return container;
+}
+
+function getCheckedValuesFromGroup(container) {
+    return Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(cb => cb.value.trim())
+        .filter(Boolean);
+}
+
 function buildResourceForm(initialData) {
     resourceForm.innerHTML = "";
 
@@ -282,12 +314,11 @@ function buildResourceForm(initialData) {
     const extraKeys = dataKeys.filter(k => !RESOURCE_FIELDS.includes(k));
     const allKeys = [...RESOURCE_FIELDS, ...extraKeys];
 
-    let categoriesSelect = null;
-    let subcategoriesSelect = null;
-    const initialCategories = data.Categories || "";
-    const initialSubcategories = data.Subcategories || "";
+    let categoriesGroup = null;
+    let subcategoriesGroup = null;
+    const initialCategories = parseCommaList(data.Categories || "");
+    const initialSubcategories = parseCommaList(data.Subcategories || "");
 
-    // sets for field type decisions
     const singleLineFields = new Set([
         "Organization",
         "Address",
@@ -320,32 +351,17 @@ function buildResourceForm(initialData) {
         let fieldEl;
 
         if (key === "Categories") {
-            // multi-select of existing categories
-            fieldEl = document.createElement("select");
-            fieldEl.multiple = true;
-            fieldEl.className = "resource-field";
-            fieldEl.dataset.field = key;
-
-            const current = new Set(parseCommaList(initialCategories));
-            getAllCategoryNames().forEach(name => {
-                const opt = document.createElement("option");
-                opt.value = name;
-                opt.textContent = name;
-                if (current.has(name)) opt.selected = true;
-                fieldEl.appendChild(opt);
-            });
-
-            categoriesSelect = fieldEl;
+            const allCats = getAllCategoryNames();
+            const selectedSet = new Set(initialCategories);
+            fieldEl = buildCheckboxGroup("Categories", allCats, selectedSet);
+            categoriesGroup = fieldEl;
         } else if (key === "Subcategories") {
-            // multi-select; options depend on selected categories
-            fieldEl = document.createElement("select");
-            fieldEl.multiple = true;
-            fieldEl.className = "resource-field";
-            fieldEl.dataset.field = key;
-
-            subcategoriesSelect = fieldEl;
+            // empty group now; will be populated based on selected categories
+            fieldEl = document.createElement("div");
+            fieldEl.className = "resource-field checkbox-group";
+            fieldEl.dataset.field = "Subcategories";
+            subcategoriesGroup = fieldEl;
         } else if (key === "Last Verified") {
-            // date input
             const input = document.createElement("input");
             input.type = "date";
             input.className = "resource-field";
@@ -368,7 +384,7 @@ function buildResourceForm(initialData) {
             input.dataset.field = key;
             input.value = value;
             input.pattern = "[0-9()+\\-\\.\\s]{7,}";
-            input.title = "Use digits and standard phone punctuation (min 7 digits).";
+            input.title = "Please enter a phone number with at least 7 digits.";
             fieldEl = input;
         } else if (key === "Website") {
             const input = document.createElement("input");
@@ -391,7 +407,6 @@ function buildResourceForm(initialData) {
             textarea.value = value;
             fieldEl = textarea;
         } else {
-            // default: textarea
             const textarea = document.createElement("textarea");
             textarea.className = "resource-field";
             textarea.dataset.field = key;
@@ -403,49 +418,52 @@ function buildResourceForm(initialData) {
         resourceForm.appendChild(wrapper);
     });
 
-    // wire categories ↔ subcategories
-    if (categoriesSelect && subcategoriesSelect) {
-        wireCategorySubcategorySelects(
-            categoriesSelect,
-            subcategoriesSelect,
+    // Wire category and subcategory checkboxes
+    if (categoriesGroup && subcategoriesGroup) {
+        wireCategorySubCheckboxes(
+            categoriesGroup,
+            subcategoriesGroup,
+            initialCategories,
             initialSubcategories
         );
     }
 }
 
-function wireCategorySubcategorySelects(catSelect, subSelect, initialSubString) {
-    const initialSubs = new Set(parseCommaList(initialSubString));
+function wireCategorySubCheckboxes(catGroup, subGroup, initialCats, initialSubs) {
+    const initialSubSet = new Set(initialSubs);
 
-    function updateSubOptions() {
-        const selectedCategories = Array.from(catSelect.selectedOptions).map(o => o.value);
-        const availableSubs = getSubcategoriesForCategories(selectedCategories);
+    function updateSubCheckboxes(preserveSelectionSet) {
+        const selectedCats = getCheckedValuesFromGroup(catGroup);
+        const availableSubs = getSubcategoriesForCategories(selectedCats);
 
-        // preserve current manual selections
-        const currentSelected = new Set(
-            Array.from(subSelect.selectedOptions).map(o => o.value)
-        );
+        const currentSelections = preserveSelectionSet
+            ? new Set(preserveSelectionSet)
+            : new Set(getCheckedValuesFromGroup(subGroup));
 
-        subSelect.innerHTML = "";
+        subGroup.innerHTML = "";
 
         availableSubs.forEach(name => {
-            const opt = document.createElement("option");
-            opt.value = name;
-            opt.textContent = name;
+            const pill = document.createElement("label");
+            pill.className = "checkbox-pill";
 
-            if (initialSubs.has(name) || currentSelected.has(name)) {
-                opt.selected = true;
-            }
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.value = name;
+            if (currentSelections.has(name)) input.checked = true;
 
-            subSelect.appendChild(opt);
+            const span = document.createElement("span");
+            span.textContent = name;
+
+            pill.appendChild(input);
+            pill.appendChild(span);
+            subGroup.appendChild(pill);
         });
     }
 
-    // initial build
-    updateSubOptions();
-    // after first run, rely only on user selections
-    initialSubs.clear();
-
-    catSelect.addEventListener("change", updateSubOptions);
+    // initial build uses initial subs
+    updateSubCheckboxes(initialSubSet);
+    // afterwards, rely on user selections
+    catGroup.addEventListener("change", () => updateSubCheckboxes(null));
 }
 
 function openResourceEditor(id, data) {
@@ -462,15 +480,13 @@ addResourceBtn.onclick = () => {
     buildResourceForm({});
 };
 
-// --------- CUSTOM VALIDATION + SAVE ----------
+// SAVE RESOURCE (with phone/email/date validation)
 saveResourceBtn.onclick = async () => {
     const fields = Array.from(resourceForm.querySelectorAll(".resource-field"));
 
-    // First, custom phone validation + standard validity checks
     for (const el of fields) {
         const fieldName = el.dataset.field;
 
-        // Reset any previous custom messages
         if (typeof el.setCustomValidity === "function") {
             el.setCustomValidity("");
         }
@@ -478,7 +494,6 @@ saveResourceBtn.onclick = async () => {
         if (fieldName === "Phone") {
             const raw = el.value.trim();
             const digitsOnly = raw.replace(/\D/g, "");
-            // allow empty; but if present, require at least 7 digits
             if (raw && digitsOnly.length < 7) {
                 el.setCustomValidity("Please enter a valid phone number with at least 7 digits.");
             }
@@ -495,7 +510,9 @@ saveResourceBtn.onclick = async () => {
         const field = el.dataset.field;
         let value;
 
-        if (el.tagName === "SELECT" && el.multiple) {
+        if (el.classList.contains("checkbox-group")) {
+            value = getCheckedValuesFromGroup(el).join(", ");
+        } else if (el.tagName === "SELECT" && el.multiple) {
             const selected = Array.from(el.selectedOptions)
                 .map(o => o.value.trim())
                 .filter(Boolean);
