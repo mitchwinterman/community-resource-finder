@@ -6,7 +6,7 @@ body {
 }
 
 .screen {
-    padding: 28px 40px 26px;
+    padding: 30px 40px 26px;
 }
 
 .hidden {
@@ -52,15 +52,15 @@ body {
     justify-content: space-between;
     align-items: center;
     background: #ffffff;
-    padding: 8px 16px;
-    border-radius: 14px;
+    padding: 12px 18px;
+    border-radius: 16px;
     box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
 }
 
 .topbar-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
 }
 
 .topbar-wcls-link {
@@ -68,24 +68,25 @@ body {
     align-items: center;
 }
 
+/* bigger WCLS and CRF logos */
 .logo-wcls-small {
-    height: 44px;
+    height: 70px;   /* was 44px */
     width: auto;
 }
 
 .topbar-crf-link {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     text-decoration: none;
-    padding: 8px 14px;
+    padding: 10px 18px;
     border-radius: 999px;
     background: radial-gradient(circle at top left, #e0f2ff 0, #f4f8ff 55%, #ffffff 100%);
-    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
 
 .logo-crf-small {
-    height: 40px;
+    height: 72px;   /* was 40px */
     width: auto;
 }
 
@@ -95,7 +96,7 @@ body {
 }
 
 .topbar-title {
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 700;
     color: #102a43;
 }
@@ -113,7 +114,7 @@ body {
 }
 
 #logoutBtn {
-    padding: 7px 13px;
+    padding: 8px 14px;
     border-radius: 999px;
     border: none;
     background: #ef4444;
@@ -385,5 +386,13 @@ body {
         flex-direction: column;
         align-items: flex-start;
         gap: 4px;
+    }
+
+    .logo-wcls-small {
+        height: 56px;
+    }
+
+    .logo-crf-small {
+        height: 58px;
     }
 }
