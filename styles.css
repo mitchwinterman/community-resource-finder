@@ -91,25 +91,10 @@ h1 {
     max-width: 620px;
 }
 
-/* SMALL HEADER NAV (right side) */
+/* SMALL HEADER NAV (now empty but kept for layout) */
 .header-nav {
     display: flex;
     justify-content: flex-end;
-}
-
-.header-link {
-    font-size: 13px;
-    color: #1d4ed8;
-    text-decoration: none;
-    padding: 6px 12px;
-    border-radius: 999px;
-    background: #eef3ff;
-    border: 1px solid #d4defa;
-    white-space: nowrap;
-}
-
-.header-link:hover {
-    background: #dbe5ff;
 }
 
 /* SEARCH + FILTERS */
@@ -299,16 +284,12 @@ select:focus {
     margin-top: 10px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
 }
 
 .contact-row {
     display: flex;
     gap: 10px;
-}
-
-.contact-row .field-group {
-    flex: 1;
 }
 
 .contact-note {
@@ -322,14 +303,39 @@ select:focus {
     resize: vertical;
 }
 
+/* checkbox row */
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+
+/* extra suggestion fields container */
+.suggest-extra {
+    margin-top: 4px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: #eef2ff;
+    border: 1px dashed #cbd5f5;
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.suggest-extra.enabled {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* CONTACT submit button (bigger) */
 .contact-submit {
     align-self: flex-start;
-    padding: 9px 16px;
+    padding: 11px 22px;
     border-radius: 999px;
     border: none;
     background: #2563eb;
     color: white;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
 }
@@ -363,7 +369,7 @@ select:focus {
     margin: 0 6px;
 }
 
-/* FIELD GROUPS (re-used in contact form) */
+/* FIELD GROUPS (shared) */
 .field-group {
     margin-bottom: 0;
 }
@@ -410,10 +416,6 @@ select:focus {
         width: 100%;
         justify-content: center;
         padding: 18px 20px;
-    }
-
-    .header-nav {
-        justify-content: center;
     }
 
     .logo-wcls {
