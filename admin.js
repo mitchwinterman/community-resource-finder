@@ -368,7 +368,7 @@ function buildResourceForm(initialData) {
             input.dataset.field = key;
             input.value = value;
             input.pattern = "[0-9()+\\-\\.\\s]{7,}";
-            input.title = "Use digits and standard phone punctuation (min 7 characters).";
+            input.title = "Use digits and standard phone punctuation (min 7 digits).";
             fieldEl = input;
         } else if (key === "Website") {
             const input = document.createElement("input");
@@ -462,11 +462,28 @@ addResourceBtn.onclick = () => {
     buildResourceForm({});
 };
 
+// --------- CUSTOM VALIDATION + SAVE ----------
 saveResourceBtn.onclick = async () => {
     const fields = Array.from(resourceForm.querySelectorAll(".resource-field"));
 
-    // validate email/phone/date/url via HTML5 validity
+    // First, custom phone validation + standard validity checks
     for (const el of fields) {
+        const fieldName = el.dataset.field;
+
+        // Reset any previous custom messages
+        if (typeof el.setCustomValidity === "function") {
+            el.setCustomValidity("");
+        }
+
+        if (fieldName === "Phone") {
+            const raw = el.value.trim();
+            const digitsOnly = raw.replace(/\D/g, "");
+            // allow empty; but if present, require at least 7 digits
+            if (raw && digitsOnly.length < 7) {
+                el.setCustomValidity("Please enter a valid phone number with at least 7 digits.");
+            }
+        }
+
         if (!el.checkValidity()) {
             el.reportValidity();
             return;
