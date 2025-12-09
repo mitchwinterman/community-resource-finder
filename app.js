@@ -52,6 +52,7 @@ const categorySelect = document.getElementById("categorySelect");
 const subcategorySelect = document.getElementById("subcategorySelect");
 const resetButton = document.getElementById("resetButton");
 const titleEl = document.getElementById("app-title");
+const brandHomeEl = document.getElementById("brand-home");
 
 const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
@@ -123,7 +124,7 @@ function renderResults(resources) {
 
     // Reset details panel to instructions (no auto-select)
     detailsDiv.innerHTML = `
-        <div style="text-align:center; color:#666;">
+        <div class="details-empty">
             Select a resource<br>
             <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
         </div>
@@ -375,11 +376,17 @@ subcategorySelect.addEventListener("change", applyFilters);
 
 resetButton.addEventListener("click", resetAll);
 
+// Center brand block and title both act as "home/reset"
+function handleHomeClick() {
+    resetAll();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+if (brandHomeEl) {
+    brandHomeEl.addEventListener("click", handleHomeClick);
+}
 if (titleEl) {
-    titleEl.addEventListener("click", () => {
-        resetAll();
-        window.scrollTo({ top: 0, behavior: "smooth" });
-    });
+    titleEl.addEventListener("click", handleHomeClick);
 }
 
 // -----------------------------
