@@ -34,9 +34,7 @@
             </div>
         </div>
 
-        <nav class="header-nav">
-            <a href="#suggest" class="header-link">Suggest a Resource</a>
-        </nav>
+        <nav class="header-nav"></nav>
     </header>
 
     <main class="static-main">
@@ -53,6 +51,7 @@
                 method="POST"
                 enctype="text/plain"
             >
+                <!-- Row 1: Name / Phone / Email -->
                 <div class="contact-row">
                     <div class="field-group">
                         <label for="contact-name">Name</label>
@@ -68,27 +67,44 @@
                     </div>
                 </div>
 
+                <!-- Message -->
                 <div class="field-group">
-                    <label for="contact-question">Question</label>
-                    <textarea id="contact-question" name="Question"></textarea>
+                    <label for="contact-message">Message</label>
+                    <textarea id="contact-message" name="Message"></textarea>
                 </div>
 
-                <div class="field-group">
-                    <label for="contact-feedback">Feedback</label>
-                    <textarea id="contact-feedback" name="Feedback"></textarea>
+                <!-- Suggest resource checkbox -->
+                <div class="checkbox-row">
+                    <input type="checkbox"
+                           id="suggest-checkbox"
+                           name="Suggest Resource" />
+                    <label for="suggest-checkbox">
+                        Check this box to suggest a new resource to consider.
+                    </label>
                 </div>
 
-                <div class="field-group" id="suggest">
-                    <label for="contact-suggested">Suggested Resource</label>
-                    <textarea id="contact-suggested" name="Suggested Resource"></textarea>
-                    <div class="contact-note">
-                        Please include as much information as you can
-                        (organization name, website, phone, address, and any
-                        contact person), if available.
+                <!-- Extra fields for suggestions -->
+                <div class="suggest-extra" id="suggest">
+                    <div class="field-group">
+                        <label for="org-name">Organization</label>
+                        <input id="org-name" name="Organization" type="text" />
+                    </div>
+                    <div class="field-group">
+                        <label for="org-contact">Contact Information</label>
+                        <input id="org-contact" name="Contact Information" type="text" />
+                    </div>
+                    <div class="field-group">
+                        <label for="org-more">More Information</label>
+                        <textarea id="org-more" name="More Information"></textarea>
+                        <div class="contact-note">
+                            Please include as much information as you can
+                            (organization name, website, phone, address, and any
+                            contact person), if available.
+                        </div>
                     </div>
                 </div>
 
-                <button type="submit" class="contact-submit">Send</button>
+                <button type="submit" class="contact-submit">Send Message</button>
             </form>
         </section>
     </main>
@@ -106,10 +122,34 @@
             <span class="footer-separator">•</span>
             <a href="contact.html">Contact</a>
             <span class="footer-separator">•</span>
+            <a href="contact.html#suggest">Suggest a Resource</a>
+            <span class="footer-separator">•</span>
             <a href="admin.html" class="footer-admin-link">Admin</a>
         </div>
     </footer>
 
 </div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const checkbox = document.getElementById("suggest-checkbox");
+    const extra = document.getElementById("suggest");
+    const extraFields = extra.querySelectorAll("input, textarea");
+
+    function updateState() {
+        if (checkbox.checked) {
+            extra.classList.add("enabled");
+            extraFields.forEach(el => { el.disabled = false; });
+        } else {
+            extra.classList.remove("enabled");
+            extraFields.forEach(el => { el.disabled = true; });
+        }
+    }
+
+    updateState();
+    checkbox.addEventListener("change", updateState);
+});
+</script>
+
 </body>
 </html>
