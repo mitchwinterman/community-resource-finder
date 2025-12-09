@@ -1,13 +1,25 @@
+// app.js — frontend for Community Resource Finder (Firestore-backed)
+
+import { db } from "./firebase.js";
+import {
+    collection,
+    getDocs
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
 // -----------------------------
-// Data loaders
+// Data loaders (Firestore)
 // -----------------------------
 async function loadData() {
     try {
-        const response = await fetch("data.json");
-        if (!response.ok) throw new Error("Bad response");
-        return await response.json();
+        const snap = await getDocs(collection(db, "resources"));
+        const list = [];
+        snap.forEach(docSnap => {
+            const data = docSnap.data();
+            list.push(data);
+        });
+        return list;
     } catch (err) {
-        console.error("DATA LOAD ERROR:", err);
+        console.error("DATA LOAD ERROR (Firestore resources):", err);
         showError("Error loading resources.");
         return [];
     }
@@ -15,11 +27,19 @@ async function loadData() {
 
 async function loadCategories() {
     try {
-        const response = await fetch("categories.json");
-        if (!response.ok) throw new Error("Bad response for categories");
-        return await response.json();
+        const snap = await getDocs(collection(db, "categories"));
+        // Build structure like: { "Category Name": ["Sub1", "Sub2"], ... }
+        const rawCats = {};
+        snap.forEach(docSnap => {
+            const data = docSnap.data();
+            const name = (data.name || "").trim();
+            if (!name) return;
+            const subs = Array.isArray(data.subcategories) ? data.subcategories : [];
+            rawCats[name] = subs;
+        });
+        return rawCats;
     } catch (err) {
-        console.error("CATEGORY LOAD ERROR:", err);
+        console.error("CATEGORY LOAD ERROR (Firestore categories):", err);
         return {};
     }
 }
@@ -31,23 +51,25 @@ const searchInput = document.getElementById("searchBox");
 const categorySelect = document.getElementById("categorySelect");
 const subcategorySelect = document.getElementById("subcategorySelect");
 const resetButton = document.getElementById("resetButton");
+const titleEl = document.getElementById("app-title");
 
 const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
+const resultCountEl = document.getElementById("resultCount");
 
 // -----------------------------
 // GLOBAL STATE
 // -----------------------------
 let globalData = [];
-let categoryOptions = [];      // [{ value: "children, youth & family services", label: "Children, Youth & Family Services" }, ...]
-let subcategoryOptions = {};   // { "children, youth & family services": [{ value, label }, ...] }
+let categoryOptions = [];      // [{ value, label }]
+let subcategoryOptions = {};   // { categoryValueLower: [{ value, label }, ...] }
 let selectedResourceId = null;
 
 // -----------------------------
 // HELPER FUNCTIONS
 // -----------------------------
 
-// --- FIX: Capitalization Map ---
+// Capitalization overrides for certain subcategories
 const specialSubcategoryCaps = {
     "aba": "ABA",
     "foster care": "Foster Care",
@@ -71,13 +93,9 @@ const specialSubcategoryCaps = {
 function formatSubcategoryLabel(label) {
     if (!label) return "";
     const lower = label.toLowerCase();
-    
-    // 1. Check if the entire lowercase label is in the special caps map
     if (specialSubcategoryCaps[lower]) {
         return specialSubcategoryCaps[lower];
     }
-
-    // 2. Simple fallback: return original label
     return label;
 }
 
@@ -85,18 +103,35 @@ function escapeRegExp(string) {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function sortByOrganizationInPlace(list) {
+    list.sort((a, b) => {
+        const nameA = (a.Organization || "").toLowerCase();
+        const nameB = (b.Organization || "").toLowerCase();
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+    });
+}
+
+function updateResultCount(count) {
+    if (!resultCountEl) return;
+    resultCountEl.textContent = `${count} result${count === 1 ? "" : "s"}`;
+}
+
 function renderResults(resources) {
     resultsDiv.innerHTML = '';
-    
-    // RESET DETAILS PANEL TO INSTRUCTIONS (No Auto-Select)
+
+    // Reset details panel to instructions (no auto-select)
     detailsDiv.innerHTML = `
         <div style="text-align:center; color:#666;">
             Select a resource<br>
             <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
         </div>
     `;
-    
+
     selectedResourceId = null;
+
+    updateResultCount(resources.length);
 
     if (resources.length === 0) {
         resultsDiv.innerHTML = '<div class="result-card">No results found.</div>';
@@ -116,14 +151,12 @@ function renderResults(resources) {
 }
 
 function showDetails(resource) {
-    // Highlight selected card logic
+    // Highlight selected card
     const cards = document.querySelectorAll('.result-card');
     cards.forEach(card => {
-        // Reset all styles
         card.style.background = "#f7f9ff";
         card.style.borderLeft = "none";
-        
-        // Highlight matched card
+
         const title = card.querySelector('.card-title').innerText;
         if (title === resource.Organization) {
             card.style.background = "#eef2ff";
@@ -136,7 +169,6 @@ function showDetails(resource) {
         ? (website.startsWith("http") ? website : "https://" + website)
         : "";
 
-    // Parse subcategories for display
     const formattedSubcategories = String(resource.Subcategories || "")
         .split(",")
         .map(v => v.trim())
@@ -171,15 +203,15 @@ function showDetails(resource) {
 
 function showError(message) {
     resultsDiv.innerHTML = `<div class="result-card">${message}</div>`;
+    updateResultCount(0);
 }
 
 // -----------------------------
 // FILTER POPULATION
 // -----------------------------
 function populateCategoryFilter() {
-    // Clear everything except "All categories"
     categorySelect.innerHTML = '<option value="all">All categories</option>';
-    
+
     categoryOptions.forEach(option => {
         const opt = document.createElement('option');
         opt.value = option.value;
@@ -190,7 +222,7 @@ function populateCategoryFilter() {
 
 function populateSubcategoryFilterForCategory(categoryValue) {
     subcategorySelect.innerHTML = '<option value="all">All subcategories</option>';
-    
+
     if (!categoryValue || categoryValue === 'all') {
         subcategorySelect.disabled = true;
         return;
@@ -230,7 +262,7 @@ function applyFilters() {
     const searchTerm = (searchInput.value || "").trim().toLowerCase();
     const categoryFilter = categorySelect.value;
     const subcategoryFilter = subcategorySelect.value;
-    
+
     const filteredData = globalData.filter(resource => {
         // 1. SEARCH FILTER
         if (searchTerm) {
@@ -247,24 +279,22 @@ function applyFilters() {
             }
         }
 
-        // 2. CATEGORY FILTER (REGEX FIX)
-        // Uses Regex to handle categories with commas inside them (e.g. "Employment, Education...")
+        // 2. CATEGORY FILTER
         if (categoryFilter !== 'all') {
             const escapedCat = escapeRegExp(categoryFilter);
-            // Regex matches: Start-of-string OR comma, then whitespace, then category, then whitespace, then comma OR end-of-string
             const regex = new RegExp(`(?:^|,)\\s*${escapedCat}\\s*(?:,|$)`, 'i');
-            
-            if (!regex.test(resource.Categories)) {
+
+            if (!regex.test(resource.Categories || "")) {
                 return false;
             }
         }
 
-        // 3. SUBCATEGORY FILTER (REGEX FIX)
+        // 3. SUBCATEGORY FILTER
         if (subcategoryFilter !== 'all') {
             const escapedSub = escapeRegExp(subcategoryFilter);
             const regex = new RegExp(`(?:^|,)\\s*${escapedSub}\\s*(?:,|$)`, 'i');
-            
-            if (!regex.test(resource.Subcategories)) {
+
+            if (!regex.test(resource.Subcategories || "")) {
                 return false;
             }
         }
@@ -272,36 +302,34 @@ function applyFilters() {
         return true;
     });
 
+    // Sort results by Organization before rendering
+    sortByOrganizationInPlace(filteredData);
     renderResults(filteredData);
 }
 
 // -----------------------------
-// INIT (FIXED STRUCTURE DETECTION)
+// INIT
 // -----------------------------
 async function init() {
     resultsDiv.innerHTML = '<div class="result-card">Loading…</div>';
+    updateResultCount(0);
 
-    // Load Data
     const [data, rawCats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
-    // Parse Categories - Robust Check for Structure
+    // Parse categories from object: { "Category Name": [subs...] }
     let categoryLabels = [];
     let rawSubcategories = {};
 
     if (rawCats && Array.isArray(rawCats.categories)) {
-        // Structure A: { categories: [...], subcategories: {...} }
-        // (Old format support)
+        // Old structure (kept for safety)
         categoryLabels = rawCats.categories;
         rawSubcategories = rawCats.subcategories || {};
     } else if (rawCats) {
-        // Structure B: { "Category Name": ["Sub1", "Sub2"] }
-        // (Current file format)
         categoryLabels = Object.keys(rawCats);
         rawSubcategories = rawCats;
     }
 
-    // Build Options
     categoryOptions = [];
     subcategoryOptions = {};
 
@@ -315,12 +343,10 @@ async function init() {
             value: valueLower
         });
 
-        // Get subcategories
         const subs = Array.isArray(rawSubcategories[catLabel])
             ? rawSubcategories[catLabel]
             : [];
 
-        // Build normalized subcategory list
         subcategoryOptions[valueLower] = subs.map(subLabel => {
             const raw = String(subLabel || "").trim();
             return {
@@ -348,6 +374,13 @@ categorySelect.addEventListener("change", () => {
 subcategorySelect.addEventListener("change", applyFilters);
 
 resetButton.addEventListener("click", resetAll);
+
+if (titleEl) {
+    titleEl.addEventListener("click", () => {
+        resetAll();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+}
 
 // -----------------------------
 // Start app
