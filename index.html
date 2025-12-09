@@ -10,14 +10,27 @@
 <body>
     <div class="wrapper">
 
-        <h1 id="app-title" class="app-title">Community Resource Finder</h1>
-        <div class="subtitle">
-            Browse, search, and filter Resources from the Washoe County Library's Community Resources Guide
-        </div>
+        <!-- BRANDED HEADER -->
+        <header class="app-header">
+            <div class="app-brand-left">
+                <img src="crf-logo.png" alt="Community Resource Finder logo" class="logo-crf" />
 
-        <div class="top-links">
-            <a href="admin.html" class="admin-link">Admin</a>
-        </div>
+                <div class="app-title-block">
+                    <h1 id="app-title" class="app-title">Community Resource Finder</h1>
+                    <div class="subtitle">
+                        Browse, search, and filter resources from the Washoe County Library’s Community Resources Guide
+                    </div>
+                </div>
+            </div>
+
+            <div class="app-brand-right">
+                <div class="app-meta">
+                    <span class="powered-by-label">A project of</span>
+                    <img src="wcls-logo.png" alt="Washoe County Library System logo" class="logo-wcls" />
+                </div>
+                <a href="admin.html" class="admin-link">Admin</a>
+            </div>
+        </header>
 
         <!-- SEARCH + FILTERS -->
         <div class="search-row">
@@ -65,7 +78,7 @@
 
             <!-- Details panel -->
             <div id="details" class="details-panel">
-                <div style="text-align:center; color:#666;">
+                <div class="details-empty">
                     Select a resource<br>
                     <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
                 </div>
