@@ -39,7 +39,7 @@ body {
     align-items: center;
 }
 .logo-wcls {
-    height: 100px;      /* enlarged */
+    height: 100px;
     width: auto;
 }
 
@@ -58,7 +58,7 @@ body {
 }
 
 .logo-crf {
-    height: 140px;      /* enlarged */
+    height: 140px;
     width: auto;
     flex-shrink: 0;
 }
@@ -91,9 +91,25 @@ h1 {
     max-width: 620px;
 }
 
-/* spacer on right just to balance grid */
-.header-spacer {
-    width: 40px;
+/* SMALL HEADER NAV (right side) */
+.header-nav {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.header-link {
+    font-size: 13px;
+    color: #1d4ed8;
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: #eef3ff;
+    border: 1px solid #d4defa;
+    white-space: nowrap;
+}
+
+.header-link:hover {
+    background: #dbe5ff;
 }
 
 /* SEARCH + FILTERS */
@@ -243,6 +259,85 @@ select:focus {
     box-shadow: 0 6px 14px rgba(15, 23, 42, 0.26);
 }
 
+/* STATIC PAGES (help/about/contact) */
+.static-main {
+    margin-top: 6px;
+}
+
+.static-card {
+    background: #f7f9ff;
+    border-radius: 14px;
+    padding: 20px 22px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.static-card h2 {
+    font-family: "Poppins", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 22px;
+    margin-bottom: 10px;
+}
+
+.static-card h3 {
+    margin-top: 14px;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.static-card p {
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.static-card ul {
+    margin-left: 18px;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+/* CONTACT FORM */
+.contact-form {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.contact-row {
+    display: flex;
+    gap: 10px;
+}
+
+.contact-row .field-group {
+    flex: 1;
+}
+
+.contact-note {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 2px;
+}
+
+.contact-form textarea {
+    min-height: 70px;
+    resize: vertical;
+}
+
+.contact-submit {
+    align-self: flex-start;
+    padding: 9px 16px;
+    border-radius: 999px;
+    border: none;
+    background: #2563eb;
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.contact-submit:hover {
+    filter: brightness(1.06);
+}
+
 /* FOOTER */
 .app-footer {
     display: flex;
@@ -266,6 +361,28 @@ select:focus {
 
 .footer-separator {
     margin: 0 6px;
+}
+
+/* FIELD GROUPS (re-used in contact form) */
+.field-group {
+    margin-bottom: 0;
+}
+
+.field-group label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 3px;
+    color: #4b5563;
+}
+
+.field-group input,
+.field-group textarea {
+    width: 100%;
+    padding: 8px;
+    border-radius: 7px;
+    border: 1px solid #cbd5f5;
+    font-size: 14px;
 }
 
 /* MOBILE */
@@ -295,8 +412,8 @@ select:focus {
         padding: 18px 20px;
     }
 
-    .header-spacer {
-        display: none;
+    .header-nav {
+        justify-content: center;
     }
 
     .logo-wcls {
@@ -325,5 +442,9 @@ select:focus {
         flex-direction: column;
         gap: 4px;
         align-items: flex-start;
+    }
+
+    .contact-row {
+        flex-direction: column;
     }
 }
