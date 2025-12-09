@@ -17,12 +17,12 @@ body {
     max-width: 1400px;
     margin: auto;
     background: #ffffff;
-    padding: 26px 32px 30px;
-    border-radius: 18px;
+    padding: 30px 36px 32px;
+    border-radius: 20px;
     box-shadow: 0 14px 35px rgba(15, 23, 42, 0.12);
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 22px;
 }
 
 /* HEADER LAYOUT */
@@ -30,16 +30,16 @@ body {
     display: grid;
     grid-template-columns: auto 1fr auto;
     align-items: center;
-    gap: 16px;
+    gap: 20px;
 }
 
-/* WCLS LOGO TOP-LEFT */
+/* WCLS LOGO TOP-LEFT — BIGGER */
 .wcls-link {
     display: inline-flex;
     align-items: center;
 }
 .logo-wcls {
-    height: 56px;
+    height: 82px;        /* was 56px */
     width: auto;
 }
 
@@ -48,17 +48,17 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 18px;
-    padding: 12px 20px;
+    gap: 22px;
+    padding: 20px 32px;  /* bigger banner */
     border-radius: 999px;
     background: radial-gradient(circle at top left, #e0f2ff 0, #f4f8ff 55%, #ffffff 100%);
-    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.14);
     margin: 0 auto;
     cursor: pointer;
 }
 
 .logo-crf {
-    height: 68px;
+    height: 108px;       /* was 68px */
     width: auto;
     flex-shrink: 0;
 }
@@ -66,11 +66,11 @@ body {
 .brand-text {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
 }
 
 h1 {
-    font-size: 30px;
+    font-size: 32px;
     font-weight: 750;
     letter-spacing: 0.03em;
 }
@@ -86,7 +86,7 @@ h1 {
 .subtitle {
     font-size: 14px;
     color: #5b6c80;
-    max-width: 520px;
+    max-width: 620px;
 }
 
 /* spacer on right just to balance grid */
@@ -272,13 +272,13 @@ select:focus {
     }
 
     .wrapper {
-        padding: 18px 18px 20px;
-        gap: 14px;
+        padding: 20px 18px 22px;
+        gap: 18px;
     }
 
     .app-header {
         grid-template-columns: 1fr;
-        row-gap: 10px;
+        row-gap: 12px;
         justify-items: center;
     }
 
@@ -313,5 +313,13 @@ select:focus {
         flex-direction: column;
         gap: 4px;
         align-items: flex-start;
+    }
+
+    .logo-wcls {
+        height: 64px;
+    }
+
+    .logo-crf {
+        height: 90px;
     }
 }
