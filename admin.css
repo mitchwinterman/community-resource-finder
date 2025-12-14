@@ -1,7 +1,8 @@
 /* ------------------------------------------------------
    admin.css
    SRM: full-file replacement
-   Fixes: header/topbar layout + keeps RTE/date styles
+   Fixes: topbar logo sizing + layout + footer
+   Keeps: existing panel/list/editor + nested categories + RTE styles
 ------------------------------------------------------ */
 
 body {
@@ -42,93 +43,82 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
+#login-error { margin-top: 10px; color: #b91c1c; font-size: 13px; }
 
 /* ------------------------------------------------------
-   TOPBAR (fixes the giant logo/stacking issue)
+   TOP BAR (your admin.html uses these exact classes)
 ------------------------------------------------------ */
 .topbar {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  column-gap: 24px;
+  column-gap: 22px;
+
   background: #ffffff;
-  padding: 14px 20px;
+  padding: 14px 18px;
   border-radius: 16px;
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
 }
 
-.topbar-left {
-  display: flex;
-  align-items: center;
-}
-
-.topbar-center {
-  display: flex;
-  justify-content: center;
-}
-
-.topbar-right {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-/* Make sure header images cannot blow up */
+/* Prevent any header images from ever rendering at full/native size */
 .topbar img {
   display: block;
   max-width: 100%;
   height: auto;
 }
 
-/* WCLS logo */
+/* Left WCLS block */
+.topbar-left { display: flex; align-items: center; }
 .topbar-wcls-link {
   display: inline-flex;
   align-items: center;
   text-decoration: none;
 }
+/* Hard cap to stop the giant header */
 .logo-wcls-small {
-  height: 80px;   /* prevents giant logo */
+  height: 80px;
+  max-height: 80px;
   width: auto;
 }
 
-/* Center CRF brand pill */
+/* Center CRF pill */
+.topbar-center { display: flex; justify-content: center; }
 .topbar-crf-link {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   text-decoration: none;
+
   padding: 10px 18px;
   border-radius: 999px;
   background: radial-gradient(circle at top left, #e0f2ff 0, #f4f8ff 55%, #ffffff 100%);
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.14);
 }
-
 .logo-crf-small {
-  height: 72px;   /* prevents giant logo */
+  height: 72px;
+  max-height: 72px;
   width: auto;
 }
 
-.topbar-text {
-  display: flex;
-  flex-direction: column;
-}
-
+.topbar-text { display: flex; flex-direction: column; }
 .topbar-title {
   font-family: "Poppins", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 18px;
   font-weight: 700;
   color: #102a43;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
 }
-
 .topbar-subtitle {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: #6b7280;
+  line-height: 1.1;
 }
 
-/* Logout */
+/* Right logout */
+.topbar-right { display: flex; align-items: center; justify-content: flex-end; }
 #logoutBtn {
   padding: 8px 16px;
   border-radius: 999px;
@@ -177,13 +167,11 @@ body {
   align-items: center;
   margin-bottom: 12px;
 }
-
 .panel-header h3 {
   margin: 0;
   font-family: "Poppins", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-weight: 600;
 }
-
 .panel-header button {
   padding: 7px 12px;
   border-radius: 999px;
@@ -247,7 +235,6 @@ body {
 
 .editor textarea { min-height: 60px; resize: vertical; }
 
-/* Editor action buttons (if present in your HTML) */
 .editor-actions {
   margin-top: 16px;
   display: flex;
@@ -346,6 +333,27 @@ body {
 }
 
 /* ------------------------------------------------------
+   FOOTER (your admin.html includes .admin-footer)
+------------------------------------------------------ */
+.admin-footer {
+  margin-top: 18px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.85);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.10);
+
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.admin-footer a { color: #2563eb; text-decoration: none; }
+.admin-footer a:hover { text-decoration: underline; }
+.footer-separator { margin: 0 8px; color: #6b7280; }
+
+/* ------------------------------------------------------
    RESPONSIVE
 ------------------------------------------------------ */
 @media (max-width: 900px) {
@@ -357,14 +365,13 @@ body {
     align-items: flex-start;
     gap: 10px;
   }
-
   .topbar-center {
     width: 100%;
     justify-content: center;
   }
 
-  .logo-wcls-small { height: 64px; }
-  .logo-crf-small { height: 64px; }
+  .logo-wcls-small { height: 64px; max-height: 64px; }
+  .logo-crf-small { height: 64px; max-height: 64px; }
 
   .admin-split { flex-direction: column; }
   .admin-list, .admin-editor { width: 100%; max-height: none; }
