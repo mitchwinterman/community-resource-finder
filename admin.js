@@ -1,43 +1,49 @@
 // ------------------------------------------------------
-// admin.js — Admin dashboard (Firestore + role-based)
+// admin.js — Admin dashboard (Firestore + email-based admin)
+// Matches admin.html IDs and layout.
 // ------------------------------------------------------
+
 import { db, auth } from "./firebase.js";
+
 import {
-    collection,
-    doc,
-    getDocs,
-    getDoc,
-    addDoc,
-    updateDoc,
-    deleteDoc
+  collection,
+  doc,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 import {
-    signInWithEmailAndPassword,
-    signOut,
-    onAuthStateChanged
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 // ------------------------------------------------------
-// DOM ELEMENTS
+// CONFIG
+// ------------------------------------------------------
+const ADMIN_EMAIL = "mwinterman@washoecounty.gov";
+
+// ------------------------------------------------------
+// DOM (matches admin.html)
 // ------------------------------------------------------
 
-// Login UI
-const loginSection = document.getElementById("login-section");
-const loginForm = document.getElementById("login-form");
-const loginEmailInput = document.getElementById("login-email");
-const loginPasswordInput = document.getElementById("login-password");
+// Login screen
+const loginScreen = document.getElementById("login-screen");
+const emailInput = document.getElementById("email");
+const passwordInput = document.getElementById("password");
+const loginBtn = document.getElementById("loginBtn");
 const loginError = document.getElementById("login-error");
 
-const logoutBtn = document.getElementById("logout-btn");
+// Admin screen
+const adminScreen = document.getElementById("admin-screen");
+const logoutBtn = document.getElementById("logoutBtn");
 
-// Admin content wrapper
-const adminContent = document.getElementById("admin-content");
-const adminEmailDisplay = document.getElementById("admin-email");
-
-// Tabs
-const tabButtons = document.querySelectorAll("[data-tab-target]");
-const tabPanels = document.querySelectorAll("[data-tab-panel]");
+// Nav + panels
+const navBtns = document.querySelectorAll(".nav-btn");
+const panelResources = document.getElementById("panel-resources");
+const panelCategories = document.getElementById("panel-categories");
 
 // Resources UI
 const resourceList = document.getElementById("resource-list");
@@ -55,729 +61,536 @@ const categoryList = document.getElementById("category-list");
 const categoryEditor = document.getElementById("category-editor");
 const categoryNameInput = document.getElementById("category-name-input");
 const subList = document.getElementById("subcategory-list");
-const addSubBtn = document.getElementById("add-subcategory-btn");
+const addSubBtn = document.getElementById("add-sub-btn");
 const saveCategoryBtn = document.getElementById("save-category-btn");
 const deleteCategoryBtn = document.getElementById("delete-category-btn");
 const cancelCategoryBtn = document.getElementById("cancel-category-btn");
 const addCategoryBtn = document.getElementById("add-category-btn");
 let editingCategoryId = null;
-let categoryMeta = []; // array of { id, name, subcategories: [] }
 
-// Role-based UI
-const rolesInfo = document.getElementById("roles-info");
+// In-memory category metadata for resource editor checkbox lists
+let categoryMeta = []; // [{ id, name, subcategories: [] }]
 
 // ------------------------------------------------------
-// HELPER FUNCTIONS
+// UI helpers
 // ------------------------------------------------------
-function showElement(el) {
-    if (!el) return;
-    el.classList.remove("hidden");
+function show(el) {
+  if (!el) return;
+  el.classList.remove("hidden");
 }
-
-function hideElement(el) {
-    if (!el) return;
-    el.classList.add("hidden");
+function hide(el) {
+  if (!el) return;
+  el.classList.add("hidden");
 }
-
-function setLoading(container, isLoading) {
-    if (!container) return;
-    if (isLoading) {
-        container.dataset.loading = "true";
-        container.classList.add("loading");
-    } else {
-        delete container.dataset.loading;
-        container.classList.remove("loading");
-    }
-}
-
 function clearChildren(el) {
-    if (!el) return;
-    while (el.firstChild) {
-        el.removeChild(el.firstChild);
-    }
+  if (!el) return;
+  while (el.firstChild) el.removeChild(el.firstChild);
 }
-
-function createEl(tag, options = {}) {
-    const el = document.createElement(tag);
-    if (options.className) el.className = options.className;
-    if (options.text) el.textContent = options.text;
-    if (options.html) el.innerHTML = options.html;
-    if (options.attrs) {
-        for (const [k, v] of Object.entries(options.attrs)) {
-            el.setAttribute(k, v);
-        }
-    }
-    return el;
-}
-
-// Simple text normalizer
 function normalizeString(str) {
-    return String(str || "").trim();
+  return String(str || "").trim();
 }
-
-// Multi-value helper
 function parseCsv(value) {
-    if (!value) return [];
-    return String(value)
-        .split(",")
-        .map(v => v.trim())
-        .filter(Boolean);
+  if (!value) return [];
+  return String(value)
+    .split(",")
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+function setLoginError(msg) {
+  if (!loginError) return;
+  loginError.textContent = msg || "";
 }
 
 // ------------------------------------------------------
-// FIRESTORE HELPERS
+// Admin check (matches your Firestore rules)
 // ------------------------------------------------------
-
-// Check if user is admin by reading /roles/{uid} doc
-async function fetchUserRoles(uid) {
-    if (!uid) return null;
-    try {
-        const rolesDocRef = doc(db, "roles", uid);
-        const snap = await getDoc(rolesDocRef);
-        if (!snap.exists()) return null;
-        return snap.data();
-    } catch (err) {
-        console.error("Error fetching roles:", err);
-        return null;
-    }
-}
-
-function userIsAdmin(rolesData) {
-    if (!rolesData) return false;
-    // Accept roles as string or array
-    const roles = rolesData.roles;
-    if (!roles) return false;
-    if (typeof roles === "string") {
-        return roles.toLowerCase() === "admin";
-    }
-    if (Array.isArray(roles)) {
-        return roles.some(r => String(r || "").toLowerCase() === "admin");
-    }
-    return false;
+function isAdminUser(user) {
+  const email = String(user?.email || "").trim().toLowerCase();
+  return email === ADMIN_EMAIL.toLowerCase();
 }
 
 // ------------------------------------------------------
-// TAB SWITCHING
+// Panel switching (matches admin.html data-panel)
 // ------------------------------------------------------
-function initTabs() {
-    tabButtons.forEach(btn => {
-        btn.addEventListener("click", () => {
-            const targetId = btn.dataset.tabTarget;
-            if (!targetId) return;
+function showPanel(panelName) {
+  // Hide both panels first
+  hide(panelResources);
+  hide(panelCategories);
 
-            // Mark button active
-            tabButtons.forEach(b => b.classList.remove("active"));
-            btn.classList.add("active");
+  if (panelName === "resources") show(panelResources);
+  if (panelName === "categories") show(panelCategories);
 
-            // Show corresponding panel
-            tabPanels.forEach(panel => {
-                if (panel.dataset.tabPanel === targetId) {
-                    showElement(panel);
-                } else {
-                    hideElement(panel);
-                }
-            });
+  // Lazy load data for panel
+  if (panelName === "categories") {
+    loadCategories().catch(err => console.error("Error loading categories:", err));
+  }
+  if (panelName === "resources") {
+    // Categories are used to render resource checkboxes; load them first
+    loadCategories()
+      .then(() => loadResources())
+      .catch(err => console.error("Error loading resources/categories:", err));
+  }
+}
 
-            // If we switched to Categories, reload them
-            if (targetId === "categories-panel") {
-                loadCategories().catch(err =>
-                    console.error("Error (lazy) loading categories:", err)
-                );
-            }
-
-            // If we switched to Resources, reload them
-            if (targetId === "resources-panel") {
-                loadResources().catch(err =>
-                    console.error("Error (lazy) loading resources:", err)
-                );
-            }
-        });
+function initNav() {
+  navBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const panel = btn.dataset.panel;
+      showPanel(panel);
     });
+  });
 
-    // Default tab: Resources
-    const defaultBtn = document.querySelector('[data-tab-target="resources-panel"]');
-    if (defaultBtn) defaultBtn.click();
+  // Default panel
+  showPanel("resources");
 }
 
 // ------------------------------------------------------
-// RESOURCE LIST + EDITOR
+// AUTH: Login / Logout / Guard
 // ------------------------------------------------------
+if (loginBtn) {
+  loginBtn.addEventListener("click", async () => {
+    setLoginError("");
 
-async function loadResources() {
-    resourceList.innerHTML = "Loading…";
-    setLoading(resourceList, true);
+    const email = String(emailInput?.value || "").trim();
+    const password = String(passwordInput?.value || "");
+
+    if (!email || !password) {
+      setLoginError("Please enter email and password.");
+      return;
+    }
 
     try {
-        const querySnap = await getDocs(collection(db, "resources"));
-        const docsArr = [];
-        querySnap.forEach(docSnap => {
-            const data = docSnap.data();
-            docsArr.push({
-                id: docSnap.id,
-                ...data
-            });
-        });
-
-        // Sort by Title (or Name if Title missing)
-        docsArr.sort((a, b) => {
-            const titleA = normalizeString(a.Title || a.Name);
-            const titleB = normalizeString(b.Title || b.Name);
-            return titleA.localeCompare(titleB);
-        });
-
-        renderResourceList(docsArr);
+      await signInWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged will take it from here
     } catch (err) {
-        console.error("Error loading resources:", err);
-        resourceList.innerHTML = "Error loading resources.";
-    } finally {
-        setLoading(resourceList, false);
+      console.error("Login error:", err);
+      setLoginError(err?.message || "Login failed.");
     }
+  });
+}
+
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("Logout error:", err);
+      alert("Logout failed. See console for details.");
+    }
+  });
+}
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    // Signed out
+    show(loginScreen);
+    hide(adminScreen);
+    setLoginError("");
+    return;
+  }
+
+  // Signed in — check admin email
+  if (!isAdminUser(user)) {
+    // Immediately sign out (keeps your admin surface clean)
+    await signOut(auth);
+    show(loginScreen);
+    hide(adminScreen);
+    setLoginError(`Access restricted. Please sign in with ${ADMIN_EMAIL}.`);
+    return;
+  }
+
+  // Admin OK
+  hide(loginScreen);
+  show(adminScreen);
+  setLoginError("");
+
+  // Initialize UI + load default panel
+  initNav();
+});
+
+// ------------------------------------------------------
+// RESOURCES
+// ------------------------------------------------------
+async function loadResources() {
+  if (!resourceList) return;
+  resourceList.textContent = "Loading…";
+
+  const querySnap = await getDocs(collection(db, "resources"));
+  const docsArr = [];
+  querySnap.forEach(docSnap => {
+    docsArr.push({ id: docSnap.id, ...docSnap.data() });
+  });
+
+  docsArr.sort((a, b) => {
+    const titleA = normalizeString(a.Title || a.Name);
+    const titleB = normalizeString(b.Title || b.Name);
+    return titleA.localeCompare(titleB);
+  });
+
+  renderResourceList(docsArr);
 }
 
 function renderResourceList(resources) {
-    clearChildren(resourceList);
+  clearChildren(resourceList);
 
-    if (!resources.length) {
-        resourceList.textContent = "No resources found.";
-        return;
-    }
+  if (!resources.length) {
+    resourceList.textContent = "No resources found.";
+    return;
+  }
 
-    resources.forEach(resource => {
-        const item = createEl("div", { className: "resource-item" });
-        const title = normalizeString(resource.Title || resource.Name || "(Untitled)");
-        const org = normalizeString(resource.OrganizationName || "");
+  resources.forEach(resource => {
+    // Your CSS styles ".list-row", so use that.
+    const row = document.createElement("div");
+    row.className = "list-row";
 
-        const heading = createEl("div", { className: "resource-title" });
-        heading.textContent = title;
+    const title = normalizeString(resource.Title || resource.Name || "(Untitled)");
+    const org = normalizeString(resource.OrganizationName || "");
 
-        const subtitle = createEl("div", { className: "resource-subtitle" });
-        subtitle.textContent = org;
+    row.textContent = org ? `${title} — ${org}` : title;
 
-        item.appendChild(heading);
-        if (org) item.appendChild(subtitle);
-
-        item.addEventListener("click", () => openResourceEditor(resource.id, resource));
-        resourceList.appendChild(item);
-    });
+    row.addEventListener("click", () => openResourceEditor(resource.id, resource));
+    resourceList.appendChild(row);
+  });
 }
 
 function getCheckedValuesFromGroup(container) {
-    return Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
-        .map(cb => cb.value.trim())
-        .filter(Boolean);
+  return Array.from(container.querySelectorAll('input[type="checkbox"]:checked'))
+    .map(cb => cb.value.trim())
+    .filter(Boolean);
 }
 
-function buildResourceForm(initialData) {
-    resourceForm.innerHTML = "";
+function createFieldGroup(labelText, inputEl) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "field-group";
 
-    const data = initialData || {};
-    const dataKeys = Object.keys(data);
-    const extraKeys = dataKeys.filter(k => !["Title", "OrganizationName", "Description"].includes(k));
+  const lbl = document.createElement("label");
+  lbl.className = "field-label";
+  lbl.textContent = labelText;
 
-    // Title
-    resourceForm.appendChild(
-        buildTextField("Title", "Title", data.Title || "", true)
-    );
-
-    // OrganizationName
-    resourceForm.appendChild(
-        buildTextField("OrganizationName", "Organization Name", data.OrganizationName || "", true)
-    );
-
-    // Description
-    resourceForm.appendChild(
-        buildTextArea("Description", "Description", data.Description || "")
-    );
-
-    // Known additional fields
-    const knownFields = [
-        "Website",
-        "Phone",
-        "Email",
-        "Address",
-        "Hours",
-        "Eligibility",
-        "Languages",
-        "Notes"
-    ];
-
-    knownFields.forEach(field => {
-        resourceForm.appendChild(
-            buildTextField(field, field, data[field] || "", false)
-        );
-    });
-
-    // Categories + Subcategories from categoryMeta
-    resourceForm.appendChild(
-        buildCategoryCheckboxGroup("Categories", "Categories", data.Categories)
-    );
-
-    resourceForm.appendChild(
-        buildSubcategoryCheckboxGroup("Subcategories", "Subcategories", data.Subcategories, data.Categories)
-    );
-
-    // Any extra unknown keys
-    extraKeys.forEach(key => {
-        resourceForm.appendChild(
-            buildTextField(key, key, data[key] || "", false)
-        );
-    });
+  wrapper.appendChild(lbl);
+  wrapper.appendChild(inputEl);
+  return wrapper;
 }
 
-function buildTextField(fieldName, label, value, required = false) {
-    const wrapper = createEl("div", { className: "resource-field" });
-    const lbl = createEl("label", { text: label });
-    const input = createEl("input");
-
-    input.type = "text";
-    input.value = value || "";
-    input.dataset.field = fieldName;
-    if (required) input.required = true;
-
-    wrapper.appendChild(lbl);
-    wrapper.appendChild(input);
-
-    // For consistent selector
-    wrapper.dataset.field = fieldName;
-    return wrapper;
+function buildTextInput(fieldName, label, value) {
+  const input = document.createElement("input");
+  input.value = value || "";
+  input.dataset.field = fieldName;
+  return createFieldGroup(label, input);
 }
 
 function buildTextArea(fieldName, label, value) {
-    const wrapper = createEl("div", { className: "resource-field" });
-    const lbl = createEl("label", { text: label });
-    const textarea = createEl("textarea");
-
-    textarea.value = value || "";
-    textarea.dataset.field = fieldName;
-
-    wrapper.appendChild(lbl);
-    wrapper.appendChild(textarea);
-    wrapper.dataset.field = fieldName;
-    return wrapper;
+  const ta = document.createElement("textarea");
+  ta.value = value || "";
+  ta.dataset.field = fieldName;
+  return createFieldGroup(label, ta);
 }
 
 function buildCheckboxGroup(fieldName, label, allValues, selectedValues) {
-    const wrapper = createEl("div", { className: "resource-field checkbox-group" });
-    wrapper.dataset.field = fieldName;
+  const wrap = document.createElement("div");
+  wrap.className = "field-group checkbox-group";
+  wrap.dataset.field = fieldName;
 
-    const lbl = createEl("div", { className: "checkbox-group-label", text: label });
-    wrapper.appendChild(lbl);
+  const groupLabel = document.createElement("div");
+  groupLabel.className = "field-label";
+  groupLabel.textContent = label;
+  wrap.appendChild(groupLabel);
 
-    const list = createEl("div", { className: "checkbox-group-list" });
-    const selectedSet = new Set((selectedValues || []).map(v => v.toLowerCase()));
+  const selectedSet = new Set((selectedValues || []).map(v => String(v).toLowerCase()));
 
-    allValues.forEach(value => {
-        const val = String(value || "").trim();
-        if (!val) return;
+  allValues.forEach(v => {
+    const val = String(v || "").trim();
+    if (!val) return;
 
-        const item = createEl("label", { className: "checkbox-item" });
-        const cb = createEl("input");
-        cb.type = "checkbox";
-        cb.value = val;
+    const pill = document.createElement("label");
+    pill.className = "checkbox-pill";
 
-        if (selectedSet.has(val.toLowerCase())) {
-            cb.checked = true;
-        }
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = val;
+    cb.checked = selectedSet.has(val.toLowerCase());
 
-        const span = createEl("span", { text: val });
-        item.appendChild(cb);
-        item.appendChild(span);
-        list.appendChild(item);
-    });
+    const span = document.createElement("span");
+    span.textContent = val;
 
-    wrapper.appendChild(list);
-    return wrapper;
+    pill.appendChild(cb);
+    pill.appendChild(span);
+    wrap.appendChild(pill);
+  });
+
+  return wrap;
 }
 
-function buildCategoryCheckboxGroup(fieldName, label, csvSelected) {
-    const selected = parseCsv(csvSelected);
-    const allCategoryNames = categoryMeta
-        .map(c => c.name)
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
-
-    return buildCheckboxGroup(fieldName, label, allCategoryNames, selected);
-}
-
-function buildSubcategoryCheckboxGroup(fieldName, label, csvSelected, csvCategories) {
-    const selected = parseCsv(csvSelected);
-    const categories = parseCsv(csvCategories);
-
-    const allSubNames = getAllSubcategoriesForCategoryList(categories);
-    return buildCheckboxGroup(fieldName, label, allSubNames, selected);
-}
-
-// Build subcategory list from selected categories
 function getAllSubcategoriesForCategoryList(categoryNames) {
-    const selected = new Set(
-        (categoryNames || [])
-            .map(name => String(name || "").trim().toLowerCase())
-            .filter(Boolean)
-    );
-    const subs = new Set();
+  const selected = new Set(
+    (categoryNames || []).map(n => String(n || "").trim().toLowerCase()).filter(Boolean)
+  );
 
-    categoryMeta.forEach(cat => {
-        if (selected.has(cat.name.toLowerCase())) {
-            (cat.subcategories || []).forEach(sub => {
-                const name = String(sub || "").trim();
-                if (name) subs.add(name);
-            });
-        }
-    });
+  const subs = new Set();
+  categoryMeta.forEach(cat => {
+    if (selected.has(String(cat.name || "").toLowerCase())) {
+      (cat.subcategories || []).forEach(sub => {
+        const name = String(sub || "").trim();
+        if (name) subs.add(name);
+      });
+    }
+  });
 
-    return Array.from(subs).sort((a, b) => a.localeCompare(b));
+  return Array.from(subs).sort((a, b) => a.localeCompare(b));
 }
 
-// ------------------------------------------------------
-// LOGIN / LOGOUT + ADMIN ROLE ENFORCEMENT
-// ------------------------------------------------------
-loginForm.addEventListener("submit", async (evt) => {
-    evt.preventDefault();
-    loginError.textContent = "";
+function buildResourceForm(initialData) {
+  if (!resourceForm) return;
+  resourceForm.innerHTML = "";
 
-    const email = loginEmailInput.value.trim();
-    const password = loginPasswordInput.value;
+  const data = initialData || {};
 
-    if (!email || !password) {
-        loginError.textContent = "Please enter email and password.";
-        return;
-    }
+  // Core fields
+  resourceForm.appendChild(buildTextInput("Title", "Title", data.Title || ""));
+  resourceForm.appendChild(buildTextInput("OrganizationName", "Organization Name", data.OrganizationName || ""));
+  resourceForm.appendChild(buildTextArea("Description", "Description", data.Description || ""));
 
-    try {
-        const cred = await signInWithEmailAndPassword(auth, email, password);
-        console.log("Logged in:", cred.user.uid);
-    } catch (err) {
-        console.error("Login error:", err);
-        loginError.textContent = err.message || "Login failed.";
-    }
-});
+  // Known fields
+  const knownFields = ["Website", "Phone", "Email", "Address", "Hours", "Eligibility", "Languages", "Notes"];
+  knownFields.forEach(f => resourceForm.appendChild(buildTextInput(f, f, data[f] || "")));
 
-logoutBtn.addEventListener("click", async () => {
-    try {
-        await signOut(auth);
-    } catch (err) {
-        console.error("Logout error:", err);
-    }
-});
+  // Category checkboxes (stored as CSV string in doc)
+  const allCategoryNames = categoryMeta.map(c => c.name).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  resourceForm.appendChild(buildCheckboxGroup("Categories", "Categories", allCategoryNames, parseCsv(data.Categories)));
 
-onAuthStateChanged(auth, async (user) => {
-    if (!user) {
-        // Not signed in
-        showElement(loginSection);
-        hideElement(adminContent);
-        adminEmailDisplay.textContent = "";
-        return;
-    }
-
-    // Signed in
-    hideElement(loginSection);
-    showElement(adminContent);
-    adminEmailDisplay.textContent = user.email || "(no email)";
-
-    // Enforce admin-only
-    const roles = await fetchUserRoles(user.uid);
-    const isAdmin = userIsAdmin(roles);
-
-    if (!isAdmin) {
-        // Not admin: show message and hide controls
-        adminContent.innerHTML = `
-            <div class="not-admin-message">
-                <h2>Access restricted</h2>
-                <p>You are signed in as <strong>${user.email || "(no email)"}</strong>, but
-                this account does not have admin permissions.</p>
-            </div>
-        `;
-        return;
-    }
-
-    // Show normal admin UI
-    rolesInfo.textContent = `You are signed in as an admin.`;
-
-    // Rebuild basic layout (ensure we didn't blow it away)
-    // In this file we assume HTML is static, so just (re)init tabs and data:
-    initTabs();
-    await loadCategories();
-    await loadResources();
-});
-
-// ------------------------------------------------------
-// RESOURCE EDITOR EVENTS
-// ------------------------------------------------------
+  // Subcategory checkboxes based on selected Categories
+  const selectedCategories = parseCsv(data.Categories);
+  const allSubs = getAllSubcategoriesForCategoryList(selectedCategories);
+  resourceForm.appendChild(buildCheckboxGroup("Subcategories", "Subcategories", allSubs, parseCsv(data.Subcategories)));
+}
 
 async function openResourceEditor(docId, data) {
-    editingResourceId = docId || null;
+  editingResourceId = docId || null;
 
-    if (editingResourceId) {
-        editorTitle.textContent = "Edit Resource";
-    } else {
-        editorTitle.textContent = "Add New Resource";
-    }
+  if (editorTitle) {
+    editorTitle.textContent = editingResourceId ? "Edit Resource" : "Add New Resource";
+  }
 
-    buildResourceForm(data || {});
-    showElement(resourceEditor);
+  buildResourceForm(data || {});
+  show(resourceEditor);
 }
 
-addResourceBtn.onclick = () => {
+if (addResourceBtn) {
+  addResourceBtn.addEventListener("click", () => {
     editingResourceId = null;
-    editorTitle.textContent = "Add New Resource";
+    if (editorTitle) editorTitle.textContent = "Add New Resource";
     buildResourceForm({});
-    showElement(resourceEditor);
-};
+    show(resourceEditor);
+  });
+}
 
-// UPDATED SAVE HANDLER
-saveResourceBtn.onclick = async () => {
-    const fields = Array.from(resourceForm.querySelectorAll(".resource-field"));
+if (cancelResourceBtn) {
+  cancelResourceBtn.addEventListener("click", () => hide(resourceEditor));
+}
 
-    // Validation pass
-    for (const el of fields) {
-        const fieldName = el.dataset.field;
+if (saveResourceBtn) {
+  saveResourceBtn.addEventListener("click", async () => {
+    if (!resourceForm) return;
 
-        // Clear any previous custom validity where supported
-        if (typeof el.setCustomValidity === "function") {
-            el.setCustomValidity("");
-        }
-
-        // Phone validation (at least 7 digits if something was entered)
-        if (fieldName === "Phone" && typeof el.value === "string") {
-            const raw = el.value.trim();
-            const digitsOnly = raw.replace(/\D/g, "");
-            if (raw && digitsOnly.length < 7) {
-                el.setCustomValidity?.("Please enter a valid phone number with at least 7 digits.");
-            }
-        }
-
-        // Only run constraint validation on elements that support it
-        if (typeof el.checkValidity === "function" && !el.checkValidity()) {
-            if (typeof el.reportValidity === "function") {
-                el.reportValidity();
-            }
-            return;
-        }
-    }
-
-    // Build the object to save
+    // Collect fields
     const obj = {};
-    fields.forEach(el => {
-        const field = el.dataset.field;
-        if (!field) return;
 
-        let value;
+    // Normal fields
+    const inputs = resourceForm.querySelectorAll("input[data-field], textarea[data-field]");
+    inputs.forEach(el => {
+      const key = el.dataset.field;
+      obj[key] = String(el.value || "");
+    });
 
-        if (el.classList.contains("checkbox-group")) {
-            // Categories / Subcategories container divs
-            const checked = getCheckedValuesFromGroup(el);
-            value = checked.join(", ");
-        } else if (el.tagName === "SELECT" && el.multiple) {
-            const selected = Array.from(el.selectedOptions)
-                .map(o => o.value.trim())
-                .filter(Boolean);
-            value = selected.join(", ");
-        } else if ("value" in el) {
-            value = el.value;
-        } else {
-            value = "";
-        }
-
-        obj[field] = value;
+    // Checkbox groups
+    const groups = resourceForm.querySelectorAll(".checkbox-group[data-field]");
+    groups.forEach(group => {
+      const key = group.dataset.field;
+      const checked = getCheckedValuesFromGroup(group);
+      obj[key] = checked.join(", ");
     });
 
     try {
-        if (editingResourceId) {
-            await updateDoc(doc(db, "resources", editingResourceId), obj);
-        } else {
-            await addDoc(collection(db, "resources"), obj);
-        }
-        hideElement(resourceEditor);
-        await loadResources();
+      if (editingResourceId) {
+        await updateDoc(doc(db, "resources", editingResourceId), obj);
+      } else {
+        await addDoc(collection(db, "resources"), obj);
+      }
+      hide(resourceEditor);
+      await loadResources();
     } catch (err) {
-        console.error("Error saving resource:", err);
-        alert("Error saving resource. See console for details.");
+      console.error("Error saving resource:", err);
+      alert("Error saving resource. See console for details.");
     }
-};
+  });
+}
 
-deleteResourceBtn.onclick = async () => {
+if (deleteResourceBtn) {
+  deleteResourceBtn.addEventListener("click", async () => {
     if (!editingResourceId) return;
-
-    const confirmDelete = window.confirm("Delete this resource?");
-    if (!confirmDelete) return;
+    if (!window.confirm("Delete this resource?")) return;
 
     try {
-        await deleteDoc(doc(db, "resources", editingResourceId));
-        hideElement(resourceEditor);
-        await loadResources();
+      await deleteDoc(doc(db, "resources", editingResourceId));
+      hide(resourceEditor);
+      await loadResources();
     } catch (err) {
-        console.error("Error deleting resource:", err);
-        alert("Error deleting resource. See console for details.");
+      console.error("Error deleting resource:", err);
+      alert("Error deleting resource. See console for details.");
     }
-};
-
-cancelResourceBtn.onclick = () => {
-    hideElement(resourceEditor);
-};
+  });
+}
 
 // ------------------------------------------------------
-// CATEGORY + SUBCATEGORY MANAGEMENT
+// CATEGORIES
 // ------------------------------------------------------
 async function loadCategories() {
-    categoryList.innerHTML = "Loading…";
-    categoryMeta = [];
+  if (!categoryList) return;
 
-    try {
-        const querySnap = await getDocs(collection(db, "categories"));
-        const docsArr = [];
-        querySnap.forEach(docSnap => {
-            const data = docSnap.data();
-            docsArr.push({
-                id: docSnap.id,
-                name: data.name || "",
-                subcategories: data.subcategories || []
-            });
-        });
+  categoryList.textContent = "Loading…";
+  categoryMeta = [];
 
-        // Sort by name
-        docsArr.sort((a, b) => a.name.localeCompare(b.name));
-        categoryMeta = docsArr;
-        renderCategoryList(docsArr);
-    } catch (err) {
-        console.error("Error loading categories:", err);
-        categoryList.textContent = "Error loading categories.";
-    }
+  const querySnap = await getDocs(collection(db, "categories"));
+  const docsArr = [];
+  querySnap.forEach(docSnap => {
+    const data = docSnap.data();
+    docsArr.push({
+      id: docSnap.id,
+      name: data.name || "",
+      subcategories: Array.isArray(data.subcategories) ? data.subcategories : []
+    });
+  });
+
+  docsArr.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  categoryMeta = docsArr;
+
+  renderCategoryList(docsArr);
 }
 
 function renderCategoryList(categories) {
-    clearChildren(categoryList);
+  clearChildren(categoryList);
 
-    if (!categories.length) {
-        categoryList.textContent = "No categories defined.";
-        return;
-    }
+  if (!categories.length) {
+    categoryList.textContent = "No categories defined.";
+    return;
+  }
 
-    categories.forEach(cat => {
-        const item = createEl("div", { className: "category-item" });
+  categories.forEach(cat => {
+    const row = document.createElement("div");
+    row.className = "list-row";
+    row.textContent = cat.name;
 
-        const title = createEl("div", { className: "category-name", text: cat.name });
-        item.appendChild(title);
-
-        const subPreview = createEl("div", { className: "category-sub-preview" });
-        const subs = (cat.subcategories || []).map(s => String(s || "").trim()).filter(Boolean);
-
-        if (subs.length) {
-            subPreview.textContent = subs.join(", ");
-        } else {
-            subPreview.textContent = "(No subcategories)";
-        }
-        item.appendChild(subPreview);
-
-        item.addEventListener("click", () => openCategoryEditor(cat));
-        categoryList.appendChild(item);
-    });
+    row.addEventListener("click", () => openCategoryEditor(cat));
+    categoryList.appendChild(row);
+  });
 }
 
 function openCategoryEditor(cat) {
-    editingCategoryId = cat ? cat.id : null;
+  editingCategoryId = cat ? cat.id : null;
 
-    if (editingCategoryId) {
-        categoryNameInput.value = cat.name || "";
-        renderSubcategoryList(cat.subcategories || []);
-    } else {
-        categoryNameInput.value = "";
-        renderSubcategoryList([]);
-    }
+  if (categoryNameInput) {
+    categoryNameInput.value = cat?.name || "";
+  }
 
-    showElement(categoryEditor);
+  renderSubcategoryList(cat?.subcategories || []);
+  show(categoryEditor);
 }
 
 function renderSubcategoryList(subcategories) {
-    clearChildren(subList);
+  clearChildren(subList);
 
-    (subcategories || []).forEach((sub, index) => {
-        const row = createEl("div", { className: "subcategory-row" });
+  (subcategories || []).forEach(sub => {
+    const row = document.createElement("div");
+    row.className = "sub-row";
 
-        const input = createEl("input");
-        input.type = "text";
-        input.value = sub || "";
-        input.dataset.index = index;
-
-        const removeBtn = createEl("button", { className: "btn btn-sm btn-danger", text: "Remove" });
-        removeBtn.addEventListener("click", () => {
-            input.closest(".subcategory-row").remove();
-        });
-
-        row.appendChild(input);
-        row.appendChild(removeBtn);
-        subList.appendChild(row);
-    });
-}
-
-addSubBtn.onclick = () => {
-    const row = createEl("div", { className: "subcategory-row" });
-
-    const input = createEl("input");
+    const input = document.createElement("input");
+    input.className = "sub-input";
     input.type = "text";
-    input.value = "";
-    input.dataset.index = subList.childElementCount;
+    input.value = String(sub || "");
 
-    const removeBtn = createEl("button", { className: "btn btn-sm btn-danger", text: "Remove" });
-    removeBtn.addEventListener("click", () => {
-        row.remove();
-    });
+    const del = document.createElement("button");
+    del.className = "sub-delete-btn";
+    del.type = "button";
+    del.textContent = "Remove";
+    del.addEventListener("click", () => row.remove());
 
     row.appendChild(input);
-    row.appendChild(removeBtn);
+    row.appendChild(del);
     subList.appendChild(row);
-};
+  });
+}
 
-addCategoryBtn.onclick = () => {
-    openCategoryEditor(null);
-};
+if (addSubBtn) {
+  addSubBtn.addEventListener("click", () => {
+    const row = document.createElement("div");
+    row.className = "sub-row";
 
-saveCategoryBtn.onclick = async () => {
-    const name = categoryNameInput.value.trim();
+    const input = document.createElement("input");
+    input.className = "sub-input";
+    input.type = "text";
+    input.value = "";
 
+    const del = document.createElement("button");
+    del.className = "sub-delete-btn";
+    del.type = "button";
+    del.textContent = "Remove";
+    del.addEventListener("click", () => row.remove());
+
+    row.appendChild(input);
+    row.appendChild(del);
+    subList.appendChild(row);
+  });
+}
+
+if (addCategoryBtn) {
+  addCategoryBtn.addEventListener("click", () => openCategoryEditor(null));
+}
+
+if (cancelCategoryBtn) {
+  cancelCategoryBtn.addEventListener("click", () => hide(categoryEditor));
+}
+
+if (saveCategoryBtn) {
+  saveCategoryBtn.addEventListener("click", async () => {
+    const name = String(categoryNameInput?.value || "").trim();
     if (!name) {
-        alert("Category name is required.");
-        return;
+      alert("Category name is required.");
+      return;
     }
 
-    const subs = Array.from(subList.querySelectorAll("input"))
-        .map(input => input.value.trim())
-        .filter(Boolean);
+    const subs = Array.from(subList?.querySelectorAll("input") || [])
+      .map(i => String(i.value || "").trim())
+      .filter(Boolean);
 
-    const payload = {
-        name,
-        subcategories: subs
-    };
+    const payload = { name, subcategories: subs };
 
     try {
-        if (editingCategoryId) {
-            await updateDoc(doc(db, "categories", editingCategoryId), payload);
-        } else {
-            await addDoc(collection(db, "categories"), payload);
-        }
-        hideElement(categoryEditor);
-        await loadCategories();
+      if (editingCategoryId) {
+        await updateDoc(doc(db, "categories", editingCategoryId), payload);
+      } else {
+        await addDoc(collection(db, "categories"), payload);
+      }
+      hide(categoryEditor);
+      await loadCategories();
     } catch (err) {
-        console.error("Error saving category:", err);
-        alert("Error saving category. See console for details.");
+      console.error("Error saving category:", err);
+      alert("Error saving category. See console for details.");
     }
-};
+  });
+}
 
-deleteCategoryBtn.onclick = async () => {
+if (deleteCategoryBtn) {
+  deleteCategoryBtn.addEventListener("click", async () => {
     if (!editingCategoryId) return;
-
-    const confirmDelete = window.confirm("Delete this category?");
-    if (!confirmDelete) return;
+    if (!window.confirm("Delete this category?")) return;
 
     try {
-        await deleteDoc(doc(db, "categories", editingCategoryId));
-        hideElement(categoryEditor);
-        await loadCategories();
+      await deleteDoc(doc(db, "categories", editingCategoryId));
+      hide(categoryEditor);
+      await loadCategories();
     } catch (err) {
-        console.error("Error deleting category:", err);
-        alert("Error deleting category. See console for details.");
+      console.error("Error deleting category:", err);
+      alert("Error deleting category. See console for details.");
     }
-};
-
-cancelCategoryBtn.onclick = () => {
-    hideElement(categoryEditor);
-};
+  });
+}
