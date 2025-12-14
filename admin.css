@@ -156,6 +156,10 @@ body {
 .nav-btn:hover {
     filter: brightness(1.05);
 }
+.nav-btn.active {
+    filter: brightness(1.08);
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.25);
+}
 
 /* PANELS */
 .panel {
@@ -274,34 +278,6 @@ body {
     min-height: 90px;
 }
 
-/* CHECKBOX GROUPS */
-.checkbox-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 14px;
-    padding: 6px 4px 2px;
-    border-radius: 8px;
-    background: #eef2ff;
-}
-
-.checkbox-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    background: #ffffff;
-    border: 1px solid #cbd5f5;
-    font-size: 12px;
-}
-
-.checkbox-pill input {
-    width: auto;
-    margin: 0;
-    padding: 0;
-    border: none;
-}
-
 /* ACTION BUTTONS */
 .editor-actions {
     margin-top: 16px;
@@ -375,6 +351,70 @@ body {
 }
 .footer-separator {
     margin: 0 6px;
+}
+
+/* ------------------------------------------------------
+   NESTED CATEGORY + SUBCATEGORY UI (SRM requirement)
+------------------------------------------------------ */
+.cat-nested {
+    background: #eef2ff;
+    border-radius: 10px;
+    padding: 10px 10px 6px;
+    border: 1px solid #d4ddff;
+}
+
+.cat-block {
+    background: #ffffff;
+    border: 1px solid #cbd5f5;
+    border-radius: 10px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+}
+
+.cat-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 14px;
+    color: #111827;
+}
+
+.cat-row input {
+    width: auto;
+    margin: 0;
+}
+
+.cat-subs {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #f3f6ff;
+    border: 1px dashed #cbd5f5;
+}
+
+.cat-sub-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cat-sub-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #111827;
+}
+
+.cat-sub-row input {
+    width: auto;
+    margin: 0;
+}
+
+.cat-sub-empty {
+    font-size: 12px;
+    color: #6b7280;
 }
 
 /* RESPONSIVE */
