@@ -9,7 +9,6 @@ import {
   collection,
   doc,
   getDocs,
-  getDoc,
   addDoc,
   updateDoc,
   deleteDoc,
@@ -22,12 +21,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 // ------------------------------------------------------
-// CONFIG
+// CONFIG (matches your Firestore rules)
 // ------------------------------------------------------
 const ADMIN_EMAIL = "mwinterman@washoecounty.gov";
 
 // ------------------------------------------------------
-// DOM (matches your admin.html)
+// DOM (must match admin.html)
 // ------------------------------------------------------
 const loginScreen = document.getElementById("login-screen");
 const adminScreen = document.getElementById("admin-screen");
@@ -38,7 +37,6 @@ const loginBtn = document.getElementById("loginBtn");
 const loginError = document.getElementById("login-error");
 const logoutBtn = document.getElementById("logoutBtn");
 
-// Nav panels
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const panelResources = document.getElementById("panel-resources");
 const panelCategories = document.getElementById("panel-categories");
@@ -48,6 +46,7 @@ const resourceList = document.getElementById("resource-list");
 const resourceEditor = document.getElementById("resource-editor");
 const editorTitle = document.getElementById("editor-title");
 const resourceForm = document.getElementById("resource-form");
+
 const addResourceBtn = document.getElementById("add-resource-btn");
 const saveResourceBtn = document.getElementById("save-resource-btn");
 const deleteResourceBtn = document.getElementById("delete-resource-btn");
@@ -59,6 +58,7 @@ const categoryEditor = document.getElementById("category-editor");
 const categoryEditorTitle = document.getElementById("category-editor-title");
 const categoryNameInput = document.getElementById("category-name-input");
 const subcategoryList = document.getElementById("subcategory-list");
+
 const addSubBtn = document.getElementById("add-sub-btn");
 const addCategoryBtn = document.getElementById("add-category-btn");
 const saveCategoryBtn = document.getElementById("save-category-btn");
@@ -73,11 +73,12 @@ let editingCategoryId = null;
 
 /**
  * categoryMeta: [{ id, name, subcategories: string[] }]
+ * This comes from /categories docs: { name: string, subcategories: string[] }
  */
 let categoryMeta = [];
 
 // ------------------------------------------------------
-// HELPERS
+// Helpers
 // ------------------------------------------------------
 function show(el) {
   el?.classList.remove("hidden");
@@ -85,16 +86,14 @@ function show(el) {
 function hide(el) {
   el?.classList.add("hidden");
 }
-function clear(el) {
+function clearChildren(el) {
   if (!el) return;
   while (el.firstChild) el.removeChild(el.firstChild);
 }
-
 function normalizeString(v) {
   return String(v ?? "").trim();
 }
-
-function parseCsv(v) {
+function parseCsvString(v) {
   const s = normalizeString(v);
   if (!s) return [];
   return s
@@ -102,11 +101,9 @@ function parseCsv(v) {
     .map(x => x.trim())
     .filter(Boolean);
 }
-
-function toCsv(arr) {
+function toCsvString(arr) {
   return (arr || []).map(x => normalizeString(x)).filter(Boolean).join(", ");
 }
-
 function createEl(tag, opts = {}) {
   const el = document.createElement(tag);
   if (opts.className) el.className = opts.className;
@@ -115,29 +112,6 @@ function createEl(tag, opts = {}) {
     for (const [k, v] of Object.entries(opts.attrs)) el.setAttribute(k, v);
   }
   return el;
-}
-
-/**
- * Returns the first key in candidates that exists on obj.
- * If none exist, returns fallbackKey.
- */
-function pickKey(obj, candidates, fallbackKey) {
-  const o = obj || {};
-  for (const k of candidates) {
-    if (Object.prototype.hasOwnProperty.call(o, k)) return k;
-  }
-  return fallbackKey;
-}
-
-/**
- * Gets value from first existing key in candidates.
- */
-function getValue(obj, candidates) {
-  const o = obj || {};
-  for (const k of candidates) {
-    if (Object.prototype.hasOwnProperty.call(o, k)) return o[k];
-  }
-  return "";
 }
 
 function isAdminUser(user) {
@@ -150,6 +124,7 @@ function isAdminUser(user) {
 // ------------------------------------------------------
 loginBtn?.addEventListener("click", async () => {
   loginError.textContent = "";
+
   const email = normalizeString(emailInput.value);
   const password = passwordInput.value;
 
@@ -182,10 +157,9 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   if (!isAdminUser(user)) {
-    // Signed in but not admin email
     show(loginScreen);
     hide(adminScreen);
-    loginError.textContent = `Signed in as ${user.email || "(no email)"} — this account is not authorized.`;
+    loginError.textContent = `Signed in as ${user.email || "(no email)"} — not authorized.`;
     await signOut(auth);
     return;
   }
@@ -194,7 +168,9 @@ onAuthStateChanged(auth, async (user) => {
   show(adminScreen);
 
   initNav();
-  await loadCategories(); // needed before resources editor renders category UI
+
+  // Load categories first because resource editor needs them for nested selector
+  await loadCategories();
   await loadResources();
 });
 
@@ -202,54 +178,52 @@ onAuthStateChanged(auth, async (user) => {
 // NAV
 // ------------------------------------------------------
 function initNav() {
-  // default to resources
-  setActivePanel("resources");
-
   navButtons.forEach(btn => {
-    btn.addEventListener("click", () => {
-      const panel = btn.dataset.panel;
-      setActivePanel(panel);
-    });
+    btn.addEventListener("click", () => setActivePanel(btn.dataset.panel));
   });
+
+  // Default: Resources
+  setActivePanel("resources");
 }
 
 function setActivePanel(panelName) {
-  // buttons
   navButtons.forEach(b => b.classList.remove("active"));
-  const activeBtn = navButtons.find(b => b.dataset.panel === panelName);
-  activeBtn?.classList.add("active");
+  const active = navButtons.find(b => b.dataset.panel === panelName);
+  active?.classList.add("active");
 
-  // panels
-  if (panelName === "resources") {
-    show(panelResources);
-    hide(panelCategories);
-  } else {
+  if (panelName === "categories") {
     hide(panelResources);
     show(panelCategories);
+  } else {
+    show(panelResources);
+    hide(panelCategories);
   }
 }
 
 // ------------------------------------------------------
 // RESOURCES
 // ------------------------------------------------------
+// SRM: Resource name is Organization (per your doc). We do not guess alternatives.
+function getResourceDisplayName(resource) {
+  return normalizeString(resource?.Organization) || "(Unnamed)";
+}
+
 async function loadResources() {
-  resourceList.textContent = "Loading…";
-  clear(resourceEditor);
-  // Recreate editor structure (since clear removes it)
-  // (We will just hide editor and rebuild form later)
-  // Instead of clearing editor container, just hide it:
+  // IMPORTANT: do NOT clear resourceEditor container (that breaks the right panel)
   hide(resourceEditor);
+  editingResourceId = null;
+
+  resourceList.textContent = "Loading…";
 
   try {
     const snap = await getDocs(collection(db, "resources"));
     const resources = [];
     snap.forEach(ds => resources.push({ id: ds.id, ...ds.data() }));
 
-    // Sort by display name (org/name/title)
     resources.sort((a, b) => {
-      const aName = getResourceDisplayName(a).toLowerCase();
-      const bName = getResourceDisplayName(b).toLowerCase();
-      return aName.localeCompare(bName);
+      const an = getResourceDisplayName(a).toLowerCase();
+      const bn = getResourceDisplayName(b).toLowerCase();
+      return an.localeCompare(bn);
     });
 
     renderResourceList(resources);
@@ -259,18 +233,8 @@ async function loadResources() {
   }
 }
 
-function getResourceDisplayName(resource) {
-  // SRM: list should show "their name" only (your SS#1 requirement)
-  // Prefer OrganizationName, then Name, then Title.
-  const org = normalizeString(getValue(resource, ["OrganizationName", "organizationName", "OrgName", "orgName"]));
-  const name = normalizeString(getValue(resource, ["Name", "name"]));
-  const title = normalizeString(getValue(resource, ["Title", "title"]));
-
-  return org || name || title || "(Unnamed)";
-}
-
 function renderResourceList(resources) {
-  clear(resourceList);
+  clearChildren(resourceList);
 
   if (!resources.length) {
     resourceList.textContent = "No resources found.";
@@ -285,8 +249,8 @@ function renderResourceList(resources) {
 }
 
 function openResourceEditor(docId, data) {
-  editingResourceId = docId || null;
-  editorTitle.textContent = editingResourceId ? "Edit Resource" : "Add New Resource";
+  editingResourceId = docId;
+  editorTitle.textContent = "Edit Resource";
   buildResourceForm(data || {});
   show(resourceEditor);
 }
@@ -302,97 +266,11 @@ cancelResourceBtn?.addEventListener("click", () => {
   hide(resourceEditor);
 });
 
-// -------------------------
-// Resource Form Builder
-// -------------------------
-function buildResourceForm(data) {
-  clear(resourceForm);
-
-  // Key binding (schema tolerant)
-  const keyDisplayName = pickKey(data, ["OrganizationName", "organizationName", "Name", "name", "Title", "title"], "OrganizationName");
-  const keyTitle = pickKey(data, ["Title", "title"], "Title");
-  const keyOrg = pickKey(data, ["OrganizationName", "organizationName"], "OrganizationName");
-
-  const keyDescription = pickKey(data, ["Description", "description"], "Description");
-  const keyWebsite = pickKey(data, ["Website", "website", "URL", "url"], "Website");
-  const keyPhone = pickKey(data, ["Phone", "phone"], "Phone");
-  const keyEmail = pickKey(data, ["Email", "email"], "Email");
-
-  // Address grouping (you explicitly called out address vs zip)
-  const keyAddress1 = pickKey(data, ["Address", "address", "Address1", "address1", "Street", "street"], "Address");
-  const keyAddress2 = pickKey(data, ["Address2", "address2", "Suite", "suite"], "Address2");
-  const keyCity = pickKey(data, ["City", "city"], "City");
-  const keyState = pickKey(data, ["State", "state"], "State");
-  const keyZip = pickKey(data, ["Zip", "ZIP", "zip", "PostalCode", "postalCode"], "Zip");
-
-  const keyHours = pickKey(data, ["Hours", "hours"], "Hours");
-  const keyEligibility = pickKey(data, ["Eligibility", "eligibility"], "Eligibility");
-  const keyLanguages = pickKey(data, ["Languages", "languages"], "Languages");
-
-  const keyKeywords = pickKey(data, ["Keywords", "keywords"], "Keywords");
-
-  // Categories/Subcategories
-  const keyCategories = pickKey(data, ["Categories", "categories"], "Categories");
-  const keySubcategories = pickKey(data, ["Subcategories", "subcategories"], "Subcategories");
-
-  const keyNotes = pickKey(data, ["Notes", "notes"], "Notes");
-
-  // 1) NAME (single primary field — list uses this)
-  resourceForm.appendChild(buildTextField(keyDisplayName, "Name", getValue(data, [keyDisplayName]), true));
-
-  // 2) OPTIONAL: show separate Organization Name only if it’s a distinct key and differs conceptually
-  // If your data already uses OrganizationName and we used it as Name, don't duplicate it.
-  if (keyOrg !== keyDisplayName) {
-    resourceForm.appendChild(buildTextField(keyOrg, "Organization Name", getValue(data, [keyOrg]), false));
-  }
-
-  // 3) OPTIONAL: Title (only if it exists historically in your docs OR you want it)
-  // If Title exists in doc OR you explicitly want it, keep it available (not required)
-  const titleExisting = Object.prototype.hasOwnProperty.call(data, keyTitle);
-  if (titleExisting) {
-    resourceForm.appendChild(buildTextField(keyTitle, "Title", getValue(data, [keyTitle]), false));
-  }
-
-  // 4) Description
-  resourceForm.appendChild(buildTextArea(keyDescription, "Description", getValue(data, [keyDescription])));
-
-  // 5) Categories + nested subcategories (your exact requirement)
-  resourceForm.appendChild(
-    buildNestedCategorySelector(
-      keyCategories,
-      keySubcategories,
-      "Categories & Subcategories",
-      parseCsv(getValue(data, [keyCategories])),
-      parseCsv(getValue(data, [keySubcategories]))
-    )
-  );
-
-  // 6) Keywords (not near the top)
-  resourceForm.appendChild(buildTextField(keyKeywords, "Keywords", getValue(data, [keyKeywords]), false));
-
-  // 7) Contact
-  resourceForm.appendChild(buildTextField(keyWebsite, "Website", getValue(data, [keyWebsite]), false));
-  resourceForm.appendChild(buildTextField(keyPhone, "Phone", getValue(data, [keyPhone]), false));
-  resourceForm.appendChild(buildTextField(keyEmail, "Email", getValue(data, [keyEmail]), false));
-
-  // 8) Address block (logical order; zip near address)
-  resourceForm.appendChild(buildTextField(keyAddress1, "Address", getValue(data, [keyAddress1]), false));
-  resourceForm.appendChild(buildTextField(keyAddress2, "Address Line 2", getValue(data, [keyAddress2]), false));
-  resourceForm.appendChild(buildTextField(keyCity, "City", getValue(data, [keyCity]), false));
-  resourceForm.appendChild(buildTextField(keyState, "State", getValue(data, [keyState]), false));
-  resourceForm.appendChild(buildTextField(keyZip, "Zip Code", getValue(data, [keyZip]), false));
-
-  // 9) Program details
-  resourceForm.appendChild(buildTextField(keyHours, "Hours", getValue(data, [keyHours]), false));
-  resourceForm.appendChild(buildTextField(keyEligibility, "Eligibility", getValue(data, [keyEligibility]), false));
-  resourceForm.appendChild(buildTextField(keyLanguages, "Languages", getValue(data, [keyLanguages]), false));
-
-  // 10) Notes (last, multiline)
-  resourceForm.appendChild(buildTextArea(keyNotes, "Notes", getValue(data, [keyNotes]), { minHeight: 120 }));
-}
-
-function buildTextField(fieldKey, label, value, required = false) {
-  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey } });
+// ------------------------------------------------------
+// Resource Form (SRM: uses the fields you provided)
+// ------------------------------------------------------
+function buildFieldText(fieldKey, label, value = "", required = false) {
+  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "text" } });
   const lbl = createEl("label", { className: "field-label", text: label });
   const input = createEl("input", { attrs: { type: "text" } });
 
@@ -404,13 +282,12 @@ function buildTextField(fieldKey, label, value, required = false) {
   return wrap;
 }
 
-function buildTextArea(fieldKey, label, value, opts = {}) {
-  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey } });
+function buildFieldTextarea(fieldKey, label, value = "") {
+  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "textarea" } });
   const lbl = createEl("label", { className: "field-label", text: label });
   const ta = createEl("textarea");
 
   ta.value = normalizeString(value);
-  if (opts.minHeight) ta.style.minHeight = `${opts.minHeight}px`;
 
   wrap.appendChild(lbl);
   wrap.appendChild(ta);
@@ -419,50 +296,45 @@ function buildTextArea(fieldKey, label, value, opts = {}) {
 
 /**
  * SRM requirement:
- * - Categories = checkboxes (only categories)
- * - When a category checked, show subcategories directly beneath that category
- * - Both are multi-select
+ * - Categories = checkboxes (ONLY categories)
+ * - When a category checked, show its subcategories directly under that category
+ * - Multi-select for both
+ * Storage (SRM: match your schema): Categories/Subcategories are string fields
  */
-function buildNestedCategorySelector(catFieldKey, subFieldKey, label, selectedCategories, selectedSubcategories) {
+function buildNestedCategorySelector(selectedCategories, selectedSubcategories) {
   const wrapper = createEl("div", {
     className: "field-group",
     attrs: {
       "data-field": "__nested_categories__",
-      "data-cat-field": catFieldKey,
-      "data-sub-field": subFieldKey,
+      "data-cat-field": "Categories",
+      "data-sub-field": "Subcategories",
     }
   });
 
-  const lbl = createEl("div", { className: "field-label", text: label });
+  const lbl = createEl("div", { className: "field-label", text: "Categories & Subcategories" });
   wrapper.appendChild(lbl);
 
-  const selectedCatSet = new Set((selectedCategories || []).map(s => s.toLowerCase()));
-  const selectedSubSet = new Set((selectedSubcategories || []).map(s => s.toLowerCase()));
+  const selectedCatSet = new Set((selectedCategories || []).map(x => x.toLowerCase()));
+  const selectedSubSet = new Set((selectedSubcategories || []).map(x => x.toLowerCase()));
 
   const container = createEl("div", { className: "cat-nested" });
 
-  // stable order
   const cats = [...categoryMeta].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-
   cats.forEach(cat => {
     const catName = normalizeString(cat.name);
     if (!catName) return;
 
     const block = createEl("div", { className: "cat-block" });
 
-    // Category row
     const catRow = createEl("label", { className: "cat-row" });
     const catCb = createEl("input", { attrs: { type: "checkbox" } });
     catCb.value = catName;
     catCb.checked = selectedCatSet.has(catName.toLowerCase());
 
-    const catText = createEl("span", { text: catName });
-
     catRow.appendChild(catCb);
-    catRow.appendChild(catText);
+    catRow.appendChild(createEl("span", { text: catName }));
     block.appendChild(catRow);
 
-    // Subcategories container (only visible if category checked)
     const subsWrap = createEl("div", { className: "cat-subs" });
 
     const subs = (cat.subcategories || [])
@@ -478,14 +350,11 @@ function buildNestedCategorySelector(catFieldKey, subFieldKey, label, selectedCa
         const subCb = createEl("input", { attrs: { type: "checkbox" } });
         subCb.value = sub;
 
-        // Only allow checked if parent category checked
-        const shouldCheck = catCb.checked && selectedSubSet.has(sub.toLowerCase());
-        subCb.checked = shouldCheck;
+        subCb.checked = catCb.checked && selectedSubSet.has(sub.toLowerCase());
         subCb.disabled = !catCb.checked;
 
-        const subText = createEl("span", { text: sub });
         subRow.appendChild(subCb);
-        subRow.appendChild(subText);
+        subRow.appendChild(createEl("span", { text: sub }));
         subList.appendChild(subRow);
       });
 
@@ -494,14 +363,12 @@ function buildNestedCategorySelector(catFieldKey, subFieldKey, label, selectedCa
       subsWrap.appendChild(createEl("div", { className: "cat-sub-empty", text: "(No subcategories)" }));
     }
 
-    // toggle visibility + enable/disable subs
     function syncSubsUI() {
       if (catCb.checked) {
         subsWrap.style.display = "block";
         subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => (cb.disabled = false));
       } else {
         subsWrap.style.display = "none";
-        // uncheck & disable subs when category unchecked
         subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
           cb.checked = false;
           cb.disabled = true;
@@ -510,11 +377,9 @@ function buildNestedCategorySelector(catFieldKey, subFieldKey, label, selectedCa
     }
 
     catCb.addEventListener("change", syncSubsUI);
-
     block.appendChild(subsWrap);
     container.appendChild(block);
 
-    // initial sync
     syncSubsUI();
   });
 
@@ -522,19 +387,66 @@ function buildNestedCategorySelector(catFieldKey, subFieldKey, label, selectedCa
   return wrapper;
 }
 
-function collectResourceFormPayload() {
+function buildResourceForm(data) {
+  clearChildren(resourceForm);
+
+  // SRM: field order is logical; notes last; notes is multiline
+  // SRM: primary name is Organization (your doc shows this is populated)
+  resourceForm.appendChild(buildFieldText("Organization", "Organization", data.Organization || "", true));
+
+  resourceForm.appendChild(buildFieldTextarea("Description", "Description", data.Description || ""));
+
+  // Categories & Subcategories
+  resourceForm.appendChild(
+    buildNestedCategorySelector(
+      parseCsvString(data.Categories || ""),
+      parseCsvString(data.Subcategories || "")
+    )
+  );
+
+  // Keywords (not at the top)
+  resourceForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
+
+  // Contact
+  resourceForm.appendChild(buildFieldText("Website", "Website", data.Website || "", false));
+  resourceForm.appendChild(buildFieldText("Phone", "Phone", data.Phone || "", false));
+  resourceForm.appendChild(buildFieldText("Email", "Email", data.Email || "", false));
+
+  // Address block
+  resourceForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
+  resourceForm.appendChild(buildFieldText("City", "City", data.City || "", false));
+  // Your sample doc doesn’t show State, so we do NOT add it.
+  resourceForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
+
+  // Program/metadata
+  resourceForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
+  resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
+  resourceForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
+  resourceForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
+  resourceForm.appendChild(buildFieldText("Last Verified", "Last Verified", data["Last Verified"] || "", false));
+  resourceForm.appendChild(buildFieldText("UpdatedBy", "Updated By", data.UpdatedBy || "", false));
+
+  // Notes LAST, multiline
+  const notes = buildFieldTextarea("Notes", "Notes", data.Notes || "");
+  const ta = notes.querySelector("textarea");
+  if (ta) ta.style.minHeight = "140px";
+  resourceForm.appendChild(notes);
+
+  // If Title / OrganizationName exist in data, we keep them editable at the VERY end
+  // (SRM: these keys exist in your doc; we do not remove them)
+  resourceForm.appendChild(buildFieldText("Title", "Title", data.Title || "", false));
+  resourceForm.appendChild(buildFieldText("OrganizationName", "OrganizationName", data.OrganizationName || "", false));
+}
+
+function collectResourcePayload() {
   const payload = {};
 
   const groups = Array.from(resourceForm.querySelectorAll(".field-group"));
-
   for (const g of groups) {
     const field = g.dataset.field;
 
-    // special nested categories block
+    // nested category selector
     if (field === "__nested_categories__") {
-      const catField = g.dataset.catField;
-      const subField = g.dataset.subField;
-
       const selectedCats = [];
       const selectedSubs = [];
 
@@ -543,6 +455,7 @@ function collectResourceFormPayload() {
         const catCb = block.querySelector(".cat-row input[type='checkbox']");
         if (catCb?.checked) {
           selectedCats.push(catCb.value);
+
           const subCbs = Array.from(block.querySelectorAll(".cat-sub-row input[type='checkbox']"));
           subCbs.forEach(scb => {
             if (scb.checked) selectedSubs.push(scb.value);
@@ -550,31 +463,27 @@ function collectResourceFormPayload() {
         }
       });
 
-      payload[catField] = toCsv(selectedCats);
-      payload[subField] = toCsv(selectedSubs);
+      payload["Categories"] = toCsvString(selectedCats);
+      payload["Subcategories"] = toCsvString(selectedSubs);
       continue;
     }
 
-    const input = g.querySelector("input, textarea, select");
-    if (!input) continue;
-    payload[field] = input.value ?? "";
+    const input = g.querySelector("input, textarea");
+    payload[field] = input ? input.value : "";
   }
 
   return payload;
 }
 
 saveResourceBtn?.addEventListener("click", async () => {
-  const payload = collectResourceFormPayload();
-
-  // minimal validation: Name must exist (first field is required already)
-  // if browser validity fails, stop
-  const requiredInputs = Array.from(resourceForm.querySelectorAll("input[required]"));
-  for (const ri of requiredInputs) {
-    if (typeof ri.checkValidity === "function" && !ri.checkValidity()) {
-      ri.reportValidity?.();
-      return;
-    }
+  // Required field validation (Organization)
+  const orgGroup = resourceForm.querySelector('.field-group[data-field="Organization"] input');
+  if (orgGroup && typeof orgGroup.checkValidity === "function" && !orgGroup.checkValidity()) {
+    orgGroup.reportValidity?.();
+    return;
   }
+
+  const payload = collectResourcePayload();
 
   try {
     if (editingResourceId) {
@@ -633,7 +542,7 @@ async function loadCategories() {
 }
 
 function renderCategoryList(cats) {
-  clear(categoryList);
+  clearChildren(categoryList);
 
   if (!cats.length) {
     categoryList.textContent = "No categories defined.";
@@ -658,7 +567,7 @@ function openCategoryEditor(cat) {
 }
 
 function renderSubcategoryEditorRows(subs) {
-  clear(subcategoryList);
+  clearChildren(subcategoryList);
 
   (subs || []).forEach((s) => {
     const row = createEl("div", { className: "sub-row" });
@@ -716,7 +625,7 @@ saveCategoryBtn?.addEventListener("click", async () => {
     }
     hide(categoryEditor);
     await loadCategories();
-    await loadResources(); // keep nested selector in sync
+    await loadResources(); // keep resource editor selector up to date
   } catch (err) {
     console.error("Error saving category:", err);
     alert("Error saving category. See console for details.");
