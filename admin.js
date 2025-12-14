@@ -1,6 +1,6 @@
 // ------------------------------------------------------
-// admin.js — Admin dashboard (Firestore + email-based admin)
-// Fixes: resource schema compatibility + keywords + revamped category/subcategory UI
+// admin.js — Admin dashboard (Firebase Auth + Firestore)
+// SRM: full-file replacement
 // ------------------------------------------------------
 
 import { db, auth } from "./firebase.js";
@@ -9,15 +9,16 @@ import {
   collection,
   doc,
   getDocs,
+  getDoc,
   addDoc,
   updateDoc,
-  deleteDoc
+  deleteDoc,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 import {
   signInWithEmailAndPassword,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 // ------------------------------------------------------
@@ -26,787 +27,713 @@ import {
 const ADMIN_EMAIL = "mwinterman@washoecounty.gov";
 
 // ------------------------------------------------------
-// DOM (matches admin.html)
+// DOM (matches your admin.html)
 // ------------------------------------------------------
-
-// Login screen
 const loginScreen = document.getElementById("login-screen");
+const adminScreen = document.getElementById("admin-screen");
+
 const emailInput = document.getElementById("email");
 const passwordInput = document.getElementById("password");
 const loginBtn = document.getElementById("loginBtn");
 const loginError = document.getElementById("login-error");
-
-// Admin screen
-const adminScreen = document.getElementById("admin-screen");
 const logoutBtn = document.getElementById("logoutBtn");
 
-// Nav + panels
-const navBtns = document.querySelectorAll(".nav-btn");
+// Nav panels
+const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const panelResources = document.getElementById("panel-resources");
 const panelCategories = document.getElementById("panel-categories");
 
 // Resources UI
 const resourceList = document.getElementById("resource-list");
 const resourceEditor = document.getElementById("resource-editor");
+const editorTitle = document.getElementById("editor-title");
 const resourceForm = document.getElementById("resource-form");
 const addResourceBtn = document.getElementById("add-resource-btn");
 const saveResourceBtn = document.getElementById("save-resource-btn");
 const deleteResourceBtn = document.getElementById("delete-resource-btn");
 const cancelResourceBtn = document.getElementById("cancel-resource-btn");
-const editorTitle = document.getElementById("editor-title");
-let editingResourceId = null;
 
 // Categories UI
 const categoryList = document.getElementById("category-list");
 const categoryEditor = document.getElementById("category-editor");
+const categoryEditorTitle = document.getElementById("category-editor-title");
 const categoryNameInput = document.getElementById("category-name-input");
-const subList = document.getElementById("subcategory-list");
+const subcategoryList = document.getElementById("subcategory-list");
 const addSubBtn = document.getElementById("add-sub-btn");
+const addCategoryBtn = document.getElementById("add-category-btn");
 const saveCategoryBtn = document.getElementById("save-category-btn");
 const deleteCategoryBtn = document.getElementById("delete-category-btn");
 const cancelCategoryBtn = document.getElementById("cancel-category-btn");
-const addCategoryBtn = document.getElementById("add-category-btn");
+
+// ------------------------------------------------------
+// STATE
+// ------------------------------------------------------
+let editingResourceId = null;
 let editingCategoryId = null;
 
-// In-memory categories for resource editor
-// [{ id, name, subcategories: string[] }]
+/**
+ * categoryMeta: [{ id, name, subcategories: string[] }]
+ */
 let categoryMeta = [];
 
 // ------------------------------------------------------
-// Utilities
+// HELPERS
 // ------------------------------------------------------
 function show(el) {
-  if (!el) return;
-  el.classList.remove("hidden");
+  el?.classList.remove("hidden");
 }
 function hide(el) {
-  if (!el) return;
-  el.classList.add("hidden");
+  el?.classList.add("hidden");
 }
-function clearChildren(el) {
+function clear(el) {
   if (!el) return;
   while (el.firstChild) el.removeChild(el.firstChild);
 }
-function normalizeString(str) {
-  return String(str ?? "").trim();
+
+function normalizeString(v) {
+  return String(v ?? "").trim();
 }
-function toLower(s) {
-  return normalizeString(s).toLowerCase();
+
+function parseCsv(v) {
+  const s = normalizeString(v);
+  if (!s) return [];
+  return s
+    .split(",")
+    .map(x => x.trim())
+    .filter(Boolean);
 }
-function setLoginError(msg) {
-  if (!loginError) return;
-  loginError.textContent = msg || "";
+
+function toCsv(arr) {
+  return (arr || []).map(x => normalizeString(x)).filter(Boolean).join(", ");
 }
+
 function createEl(tag, opts = {}) {
   const el = document.createElement(tag);
   if (opts.className) el.className = opts.className;
   if (opts.text != null) el.textContent = opts.text;
-  if (opts.html != null) el.innerHTML = opts.html;
   if (opts.attrs) {
-    Object.entries(opts.attrs).forEach(([k, v]) => el.setAttribute(k, v));
+    for (const [k, v] of Object.entries(opts.attrs)) el.setAttribute(k, v);
   }
   return el;
 }
 
-// Parse various formats into a string array
-function normalizeToStringArray(value) {
-  if (value == null) return [];
-  if (Array.isArray(value)) {
-    return value.map(v => normalizeString(v)).filter(Boolean);
-  }
-  if (typeof value === "string") {
-    // CSV-ish
-    return value
-      .split(",")
-      .map(v => normalizeString(v))
-      .filter(Boolean);
-  }
-  // Unknown object types — ignore safely
-  return [];
-}
-
-// Convert selection back to original format (string vs array) when saving
-function serializeByOriginalType(originalValue, arr) {
-  if (Array.isArray(originalValue)) return arr;
-  // default to string if original was string or missing
-  return arr.join(", ");
-}
-
-// Pick first existing key from candidates (case-sensitive)
-function pickExistingKey(obj, candidates, fallback) {
+/**
+ * Returns the first key in candidates that exists on obj.
+ * If none exist, returns fallbackKey.
+ */
+function pickKey(obj, candidates, fallbackKey) {
+  const o = obj || {};
   for (const k of candidates) {
-    if (Object.prototype.hasOwnProperty.call(obj, k)) return k;
+    if (Object.prototype.hasOwnProperty.call(o, k)) return k;
   }
-  return fallback;
+  return fallbackKey;
 }
 
-// Read a value from obj using key candidates
-function readByCandidates(obj, candidates, fallback = "") {
+/**
+ * Gets value from first existing key in candidates.
+ */
+function getValue(obj, candidates) {
+  const o = obj || {};
   for (const k of candidates) {
-    if (obj && Object.prototype.hasOwnProperty.call(obj, k)) {
-      const v = obj[k];
-      if (v != null && normalizeString(v) !== "") return v;
-    }
+    if (Object.prototype.hasOwnProperty.call(o, k)) return o[k];
   }
-  return fallback;
+  return "";
 }
 
-// ------------------------------------------------------
-// Admin check (matches your Firestore rules)
-// ------------------------------------------------------
 function isAdminUser(user) {
-  const email = String(user?.email || "").trim().toLowerCase();
+  const email = normalizeString(user?.email).toLowerCase();
   return email === ADMIN_EMAIL.toLowerCase();
-}
-
-// ------------------------------------------------------
-// Panels / Nav
-// ------------------------------------------------------
-function showPanel(panelName) {
-  hide(panelResources);
-  hide(panelCategories);
-
-  if (panelName === "resources") show(panelResources);
-  if (panelName === "categories") show(panelCategories);
-
-  if (panelName === "categories") {
-    loadCategories().catch(err => console.error("Error loading categories:", err));
-  }
-
-  if (panelName === "resources") {
-    // Need categories to render category/subcategory blocks
-    loadCategories()
-      .then(() => loadResources())
-      .catch(err => console.error("Error loading resources/categories:", err));
-  }
-}
-
-function initNav() {
-  navBtns.forEach(btn => {
-    btn.addEventListener("click", () => {
-      const panel = btn.dataset.panel;
-      showPanel(panel);
-    });
-  });
-
-  showPanel("resources");
 }
 
 // ------------------------------------------------------
 // AUTH
 // ------------------------------------------------------
-if (loginBtn) {
-  loginBtn.addEventListener("click", async () => {
-    setLoginError("");
+loginBtn?.addEventListener("click", async () => {
+  loginError.textContent = "";
+  const email = normalizeString(emailInput.value);
+  const password = passwordInput.value;
 
-    const email = String(emailInput?.value || "").trim();
-    const password = String(passwordInput?.value || "");
+  if (!email || !password) {
+    loginError.textContent = "Please enter email and password.";
+    return;
+  }
 
-    if (!email || !password) {
-      setLoginError("Please enter email and password.");
-      return;
-    }
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+  } catch (err) {
+    console.error("Login error:", err);
+    loginError.textContent = err?.message || "Login failed.";
+  }
+});
 
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (err) {
-      console.error("Login error:", err);
-      setLoginError(err?.message || "Login failed.");
-    }
-  });
-}
-
-if (logoutBtn) {
-  logoutBtn.addEventListener("click", async () => {
-    try {
-      await signOut(auth);
-    } catch (err) {
-      console.error("Logout error:", err);
-      alert("Logout failed. See console for details.");
-    }
-  });
-}
+logoutBtn?.addEventListener("click", async () => {
+  try {
+    await signOut(auth);
+  } catch (err) {
+    console.error("Logout error:", err);
+  }
+});
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     show(loginScreen);
     hide(adminScreen);
-    setLoginError("");
     return;
   }
 
   if (!isAdminUser(user)) {
-    await signOut(auth);
+    // Signed in but not admin email
     show(loginScreen);
     hide(adminScreen);
-    setLoginError(`Access restricted. Please sign in with ${ADMIN_EMAIL}.`);
+    loginError.textContent = `Signed in as ${user.email || "(no email)"} — this account is not authorized.`;
+    await signOut(auth);
     return;
   }
 
   hide(loginScreen);
   show(adminScreen);
-  setLoginError("");
 
   initNav();
+  await loadCategories(); // needed before resources editor renders category UI
+  await loadResources();
 });
 
 // ------------------------------------------------------
-// CATEGORIES (load + editor)
+// NAV
 // ------------------------------------------------------
-function normalizeCategoryDoc(docId, data) {
-  const name =
-    normalizeString(data?.name) ||
-    normalizeString(data?.Name) ||
-    normalizeString(data?.category) ||
-    normalizeString(data?.Category) ||
-    "";
+function initNav() {
+  // default to resources
+  setActivePanel("resources");
 
-  // subcategories may be array or csv string under different keys
-  const subsRaw =
-    data?.subcategories ??
-    data?.Subcategories ??
-    data?.subs ??
-    data?.Subs ??
-    data?.subCats ??
-    data?.SubCats ??
-    "";
-
-  const subcategories = normalizeToStringArray(subsRaw);
-
-  return { id: docId, name, subcategories };
-}
-
-async function loadCategories() {
-  if (!categoryList) return;
-
-  categoryList.textContent = "Loading…";
-  categoryMeta = [];
-
-  const querySnap = await getDocs(collection(db, "categories"));
-  const docsArr = [];
-  querySnap.forEach(docSnap => {
-    docsArr.push(normalizeCategoryDoc(docSnap.id, docSnap.data()));
+  navButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const panel = btn.dataset.panel;
+      setActivePanel(panel);
+    });
   });
-
-  docsArr
-    .filter(c => c.name)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  categoryMeta = docsArr;
-  renderCategoryList(docsArr);
 }
 
-function renderCategoryList(categories) {
-  clearChildren(categoryList);
+function setActivePanel(panelName) {
+  // buttons
+  navButtons.forEach(b => b.classList.remove("active"));
+  const activeBtn = navButtons.find(b => b.dataset.panel === panelName);
+  activeBtn?.classList.add("active");
 
-  if (!categories.length) {
-    categoryList.textContent = "No categories defined.";
-    return;
+  // panels
+  if (panelName === "resources") {
+    show(panelResources);
+    hide(panelCategories);
+  } else {
+    hide(panelResources);
+    show(panelCategories);
   }
-
-  categories.forEach(cat => {
-    const row = document.createElement("div");
-    row.className = "list-row";
-    row.textContent = cat.name || "(Unnamed category)";
-    row.addEventListener("click", () => openCategoryEditor(cat));
-    categoryList.appendChild(row);
-  });
-}
-
-function openCategoryEditor(cat) {
-  editingCategoryId = cat ? cat.id : null;
-
-  if (categoryNameInput) {
-    categoryNameInput.value = cat?.name || "";
-  }
-
-  renderSubcategoryList(cat?.subcategories || []);
-  show(categoryEditor);
-}
-
-function renderSubcategoryList(subcategories) {
-  clearChildren(subList);
-
-  (subcategories || []).forEach(sub => {
-    const row = document.createElement("div");
-    row.className = "sub-row";
-
-    const input = document.createElement("input");
-    input.className = "sub-input";
-    input.type = "text";
-    input.value = String(sub || "");
-
-    const del = document.createElement("button");
-    del.className = "sub-delete-btn";
-    del.type = "button";
-    del.textContent = "Remove";
-    del.addEventListener("click", () => row.remove());
-
-    row.appendChild(input);
-    row.appendChild(del);
-    subList.appendChild(row);
-  });
-}
-
-if (addSubBtn) {
-  addSubBtn.addEventListener("click", () => {
-    const row = document.createElement("div");
-    row.className = "sub-row";
-
-    const input = document.createElement("input");
-    input.className = "sub-input";
-    input.type = "text";
-    input.value = "";
-
-    const del = document.createElement("button");
-    del.className = "sub-delete-btn";
-    del.type = "button";
-    del.textContent = "Remove";
-    del.addEventListener("click", () => row.remove());
-
-    row.appendChild(input);
-    row.appendChild(del);
-    subList.appendChild(row);
-  });
-}
-
-if (addCategoryBtn) {
-  addCategoryBtn.addEventListener("click", () => openCategoryEditor(null));
-}
-
-if (cancelCategoryBtn) {
-  cancelCategoryBtn.addEventListener("click", () => hide(categoryEditor));
-}
-
-if (saveCategoryBtn) {
-  saveCategoryBtn.addEventListener("click", async () => {
-    const name = String(categoryNameInput?.value || "").trim();
-    if (!name) {
-      alert("Category name is required.");
-      return;
-    }
-
-    const subs = Array.from(subList?.querySelectorAll("input") || [])
-      .map(i => String(i.value || "").trim())
-      .filter(Boolean);
-
-    const payload = { name, subcategories: subs };
-
-    try {
-      if (editingCategoryId) {
-        await updateDoc(doc(db, "categories", editingCategoryId), payload);
-      } else {
-        await addDoc(collection(db, "categories"), payload);
-      }
-      hide(categoryEditor);
-      await loadCategories();
-    } catch (err) {
-      console.error("Error saving category:", err);
-      alert("Error saving category. See console for details.");
-    }
-  });
-}
-
-if (deleteCategoryBtn) {
-  deleteCategoryBtn.addEventListener("click", async () => {
-    if (!editingCategoryId) return;
-    if (!window.confirm("Delete this category?")) return;
-
-    try {
-      await deleteDoc(doc(db, "categories", editingCategoryId));
-      hide(categoryEditor);
-      await loadCategories();
-    } catch (err) {
-      console.error("Error deleting category:", err);
-      alert("Error deleting category. See console for details.");
-    }
-  });
 }
 
 // ------------------------------------------------------
-// RESOURCES (list + editor)
+// RESOURCES
 // ------------------------------------------------------
-
-// For display, accept many possible field names
-function getResourceTitle(resource) {
-  const v = readByCandidates(resource, ["Title", "title", "Name", "name"], "");
-  return normalizeString(v) || "(Untitled)";
-}
-function getResourceOrg(resource) {
-  const v = readByCandidates(resource, ["OrganizationName", "organizationName", "OrgName", "orgName", "Organization", "organization"], "");
-  return normalizeString(v);
-}
-
 async function loadResources() {
-  if (!resourceList) return;
   resourceList.textContent = "Loading…";
+  clear(resourceEditor);
+  // Recreate editor structure (since clear removes it)
+  // (We will just hide editor and rebuild form later)
+  // Instead of clearing editor container, just hide it:
+  hide(resourceEditor);
 
-  const querySnap = await getDocs(collection(db, "resources"));
-  const docsArr = [];
-  querySnap.forEach(docSnap => {
-    docsArr.push({ id: docSnap.id, ...docSnap.data() });
-  });
+  try {
+    const snap = await getDocs(collection(db, "resources"));
+    const resources = [];
+    snap.forEach(ds => resources.push({ id: ds.id, ...ds.data() }));
 
-  docsArr.sort((a, b) => getResourceTitle(a).localeCompare(getResourceTitle(b)));
-  renderResourceList(docsArr);
+    // Sort by display name (org/name/title)
+    resources.sort((a, b) => {
+      const aName = getResourceDisplayName(a).toLowerCase();
+      const bName = getResourceDisplayName(b).toLowerCase();
+      return aName.localeCompare(bName);
+    });
+
+    renderResourceList(resources);
+  } catch (err) {
+    console.error("Error loading resources:", err);
+    resourceList.textContent = "Error loading resources.";
+  }
+}
+
+function getResourceDisplayName(resource) {
+  // SRM: list should show "their name" only (your SS#1 requirement)
+  // Prefer OrganizationName, then Name, then Title.
+  const org = normalizeString(getValue(resource, ["OrganizationName", "organizationName", "OrgName", "orgName"]));
+  const name = normalizeString(getValue(resource, ["Name", "name"]));
+  const title = normalizeString(getValue(resource, ["Title", "title"]));
+
+  return org || name || title || "(Unnamed)";
 }
 
 function renderResourceList(resources) {
-  clearChildren(resourceList);
+  clear(resourceList);
 
   if (!resources.length) {
     resourceList.textContent = "No resources found.";
     return;
   }
 
-  resources.forEach(resource => {
-    const row = document.createElement("div");
-    row.className = "list-row";
-
-    const title = getResourceTitle(resource);
-    const org = getResourceOrg(resource);
-
-    row.textContent = org ? `${title} — ${org}` : title;
-    row.addEventListener("click", () => openResourceEditor(resource.id, resource));
+  resources.forEach(r => {
+    const row = createEl("div", { className: "list-row", text: getResourceDisplayName(r) });
+    row.addEventListener("click", () => openResourceEditor(r.id, r));
     resourceList.appendChild(row);
   });
 }
 
-function createFieldGroup(labelText, inputEl) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "field-group";
-
-  const lbl = document.createElement("label");
-  lbl.className = "field-label";
-  lbl.textContent = labelText;
-
-  wrapper.appendChild(lbl);
-  wrapper.appendChild(inputEl);
-  return wrapper;
-}
-
-function buildTextInput(fieldKey, label, value) {
-  const input = document.createElement("input");
-  input.value = value || "";
-  input.dataset.field = fieldKey;
-  return createFieldGroup(label, input);
-}
-
-function buildTextArea(fieldKey, label, value) {
-  const ta = document.createElement("textarea");
-  ta.value = value || "";
-  ta.dataset.field = fieldKey;
-  return createFieldGroup(label, ta);
-}
-
-// ------------------------------------------------------
-// NEW Category/Subcategory selector UI for Resource Editor
-// - Categories: checkbox list
-// - Subcategories appear under each selected category
-// - Both support multi-select
-// ------------------------------------------------------
-function buildCategorySubcategorySelector({
-  categoriesKey,
-  subcategoriesKey,
-  selectedCategories,
-  selectedSubcategories,
-  originalCategoriesValue,
-  originalSubcategoriesValue
-}) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "field-group";
-
-  const label = document.createElement("div");
-  label.className = "field-label";
-  label.textContent = "Categories & Subcategories";
-  wrapper.appendChild(label);
-
-  // store keys + original types for save()
-  wrapper.dataset.categoriesKey = categoriesKey;
-  wrapper.dataset.subcategoriesKey = subcategoriesKey;
-  wrapper._originalCategoriesValue = originalCategoriesValue;
-  wrapper._originalSubcategoriesValue = originalSubcategoriesValue;
-
-  const selectedCatSet = new Set(selectedCategories.map(toLower));
-  const selectedSubSet = new Set(selectedSubcategories.map(toLower));
-
-  const container = document.createElement("div");
-  container.className = "cat-selector";
-  wrapper.appendChild(container);
-
-  const catsSorted = [...categoryMeta]
-    .filter(c => c && c.name)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  catsSorted.forEach(cat => {
-    const catBlock = document.createElement("div");
-    catBlock.className = "cat-block";
-    catBlock.dataset.catName = cat.name;
-
-    // category checkbox
-    const catRow = document.createElement("label");
-    catRow.className = "cat-row";
-
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.className = "cat-cb";
-    cb.value = cat.name;
-    cb.checked = selectedCatSet.has(toLower(cat.name));
-
-    const catName = document.createElement("span");
-    catName.textContent = cat.name;
-
-    catRow.appendChild(cb);
-    catRow.appendChild(catName);
-    catBlock.appendChild(catRow);
-
-    // subcategories area (only shown when category checked)
-    const subsWrap = document.createElement("div");
-    subsWrap.className = "cat-subs";
-
-    const subs = (cat.subcategories || []).map(s => normalizeString(s)).filter(Boolean);
-
-    if (!subs.length) {
-      const empty = document.createElement("div");
-      empty.className = "cat-subs-empty";
-      empty.textContent = "No subcategories";
-      subsWrap.appendChild(empty);
-    } else {
-      subs.forEach(sub => {
-        const subRow = document.createElement("label");
-        subRow.className = "sub-row-cb";
-
-        const subCb = document.createElement("input");
-        subCb.type = "checkbox";
-        subCb.className = "sub-cb";
-        subCb.value = sub;
-        subCb.checked = selectedSubSet.has(toLower(sub));
-
-        const subName = document.createElement("span");
-        subName.textContent = sub;
-
-        subRow.appendChild(subCb);
-        subRow.appendChild(subName);
-        subsWrap.appendChild(subRow);
-      });
-    }
-
-    catBlock.appendChild(subsWrap);
-    container.appendChild(catBlock);
-
-    // initial show/hide
-    subsWrap.style.display = cb.checked ? "block" : "none";
-
-    // toggle behavior:
-    // - when unchecked, hide subs AND clear any selected subs in that block
-    cb.addEventListener("change", () => {
-      const checked = cb.checked;
-      subsWrap.style.display = checked ? "block" : "none";
-
-      if (!checked) {
-        subsWrap.querySelectorAll('input[type="checkbox"]').forEach(x => {
-          x.checked = false;
-        });
-      }
-    });
-  });
-
-  return wrapper;
-}
-
-function collectCategorySubcategorySelector(selectorEl) {
-  const categoriesKey = selectorEl.dataset.categoriesKey;
-  const subcategoriesKey = selectorEl.dataset.subcategoriesKey;
-
-  const selectedCategories = Array.from(selectorEl.querySelectorAll(".cat-cb:checked"))
-    .map(cb => normalizeString(cb.value))
-    .filter(Boolean);
-
-  const selectedSubcategories = Array.from(selectorEl.querySelectorAll(".sub-cb:checked"))
-    .map(cb => normalizeString(cb.value))
-    .filter(Boolean);
-
-  const originalCategoriesValue = selectorEl._originalCategoriesValue;
-  const originalSubcategoriesValue = selectorEl._originalSubcategoriesValue;
-
-  return {
-    categoriesKey,
-    subcategoriesKey,
-    selectedCategories,
-    selectedSubcategories,
-    originalCategoriesValue,
-    originalSubcategoriesValue
-  };
-}
-
-// ------------------------------------------------------
-// Resource Editor (schema-aware)
-// ------------------------------------------------------
-function buildResourceForm(initialData) {
-  if (!resourceForm) return;
-  resourceForm.innerHTML = "";
-
-  const data = initialData || {};
-
-  // Detect which keys this doc uses (so we don’t “lose” fields or write duplicates)
-  const titleKey = pickExistingKey(data, ["Title", "title", "Name", "name"], "Title");
-  const orgKey = pickExistingKey(
-    data,
-    ["OrganizationName", "organizationName", "OrgName", "orgName", "Organization", "organization"],
-    "OrganizationName"
-  );
-  const descKey = pickExistingKey(data, ["Description", "description", "Desc", "desc"], "Description");
-  const keywordsKey = pickExistingKey(data, ["Keywords", "keywords", "Tags", "tags"], "Keywords");
-  const categoriesKey = pickExistingKey(data, ["Categories", "categories"], "Categories");
-  const subcategoriesKey = pickExistingKey(data, ["Subcategories", "subcategories"], "Subcategories");
-
-  // Core fields
-  resourceForm.appendChild(buildTextInput(titleKey, "Title", data[titleKey] || ""));
-  resourceForm.appendChild(buildTextInput(orgKey, "Organization Name", data[orgKey] || ""));
-  resourceForm.appendChild(buildTextArea(descKey, "Description", data[descKey] || ""));
-
-  // Keywords (restored)
-  resourceForm.appendChild(buildTextInput(keywordsKey, "Keywords", data[keywordsKey] || ""));
-
-  // Common optional fields (render them if present OR allow filling them in)
-  const optionalFields = [
-    { label: "Website", candidates: ["Website", "website", "URL", "url", "Link", "link"], fallback: "Website" },
-    { label: "Phone", candidates: ["Phone", "phone", "PhoneNumber", "phoneNumber"], fallback: "Phone" },
-    { label: "Email", candidates: ["Email", "email"], fallback: "Email" },
-    { label: "Address", candidates: ["Address", "address", "Location", "location"], fallback: "Address" },
-    { label: "Hours", candidates: ["Hours", "hours"], fallback: "Hours" },
-    { label: "Eligibility", candidates: ["Eligibility", "eligibility"], fallback: "Eligibility" },
-    { label: "Languages", candidates: ["Languages", "languages"], fallback: "Languages" },
-    { label: "Notes", candidates: ["Notes", "notes"], fallback: "Notes" }
-  ];
-
-  optionalFields.forEach(f => {
-    const key = pickExistingKey(data, f.candidates, f.fallback);
-    resourceForm.appendChild(buildTextInput(key, f.label, data[key] || ""));
-  });
-
-  // Category/Subcategory selector (revamped)
-  const selectedCategories = normalizeToStringArray(data[categoriesKey]);
-  const selectedSubcategories = normalizeToStringArray(data[subcategoriesKey]);
-
-  resourceForm.appendChild(
-    buildCategorySubcategorySelector({
-      categoriesKey,
-      subcategoriesKey,
-      selectedCategories,
-      selectedSubcategories,
-      originalCategoriesValue: data[categoriesKey],
-      originalSubcategoriesValue: data[subcategoriesKey]
-    })
-  );
-
-  // Render any extra keys (so you never “lose” fields)
-  const alreadyRendered = new Set([
-    titleKey, orgKey, descKey, keywordsKey,
-    pickExistingKey(data, ["Website", "website", "URL", "url", "Link", "link"], "Website"),
-    pickExistingKey(data, ["Phone", "phone", "PhoneNumber", "phoneNumber"], "Phone"),
-    pickExistingKey(data, ["Email", "email"], "Email"),
-    pickExistingKey(data, ["Address", "address", "Location", "location"], "Address"),
-    pickExistingKey(data, ["Hours", "hours"], "Hours"),
-    pickExistingKey(data, ["Eligibility", "eligibility"], "Eligibility"),
-    pickExistingKey(data, ["Languages", "languages"], "Languages"),
-    pickExistingKey(data, ["Notes", "notes"], "Notes"),
-    categoriesKey,
-    subcategoriesKey
-  ]);
-
-  Object.keys(data).forEach(k => {
-    if (k === "id") return;
-    if (alreadyRendered.has(k)) return;
-
-    // If it’s an object/array, don’t render a broken input; keep safe.
-    const v = data[k];
-    if (typeof v === "object" && v != null) return;
-
-    resourceForm.appendChild(buildTextInput(k, k, v || ""));
-  });
-}
-
-async function openResourceEditor(docId, data) {
+function openResourceEditor(docId, data) {
   editingResourceId = docId || null;
-
-  if (editorTitle) {
-    editorTitle.textContent = editingResourceId ? "Edit Resource" : "Add New Resource";
-  }
-
+  editorTitle.textContent = editingResourceId ? "Edit Resource" : "Add New Resource";
   buildResourceForm(data || {});
   show(resourceEditor);
 }
 
-if (addResourceBtn) {
-  addResourceBtn.addEventListener("click", () => {
-    editingResourceId = null;
-    if (editorTitle) editorTitle.textContent = "Add New Resource";
-    buildResourceForm({});
-    show(resourceEditor);
+addResourceBtn?.addEventListener("click", () => {
+  editingResourceId = null;
+  editorTitle.textContent = "Add New Resource";
+  buildResourceForm({});
+  show(resourceEditor);
+});
+
+cancelResourceBtn?.addEventListener("click", () => {
+  hide(resourceEditor);
+});
+
+// -------------------------
+// Resource Form Builder
+// -------------------------
+function buildResourceForm(data) {
+  clear(resourceForm);
+
+  // Key binding (schema tolerant)
+  const keyDisplayName = pickKey(data, ["OrganizationName", "organizationName", "Name", "name", "Title", "title"], "OrganizationName");
+  const keyTitle = pickKey(data, ["Title", "title"], "Title");
+  const keyOrg = pickKey(data, ["OrganizationName", "organizationName"], "OrganizationName");
+
+  const keyDescription = pickKey(data, ["Description", "description"], "Description");
+  const keyWebsite = pickKey(data, ["Website", "website", "URL", "url"], "Website");
+  const keyPhone = pickKey(data, ["Phone", "phone"], "Phone");
+  const keyEmail = pickKey(data, ["Email", "email"], "Email");
+
+  // Address grouping (you explicitly called out address vs zip)
+  const keyAddress1 = pickKey(data, ["Address", "address", "Address1", "address1", "Street", "street"], "Address");
+  const keyAddress2 = pickKey(data, ["Address2", "address2", "Suite", "suite"], "Address2");
+  const keyCity = pickKey(data, ["City", "city"], "City");
+  const keyState = pickKey(data, ["State", "state"], "State");
+  const keyZip = pickKey(data, ["Zip", "ZIP", "zip", "PostalCode", "postalCode"], "Zip");
+
+  const keyHours = pickKey(data, ["Hours", "hours"], "Hours");
+  const keyEligibility = pickKey(data, ["Eligibility", "eligibility"], "Eligibility");
+  const keyLanguages = pickKey(data, ["Languages", "languages"], "Languages");
+
+  const keyKeywords = pickKey(data, ["Keywords", "keywords"], "Keywords");
+
+  // Categories/Subcategories
+  const keyCategories = pickKey(data, ["Categories", "categories"], "Categories");
+  const keySubcategories = pickKey(data, ["Subcategories", "subcategories"], "Subcategories");
+
+  const keyNotes = pickKey(data, ["Notes", "notes"], "Notes");
+
+  // 1) NAME (single primary field — list uses this)
+  resourceForm.appendChild(buildTextField(keyDisplayName, "Name", getValue(data, [keyDisplayName]), true));
+
+  // 2) OPTIONAL: show separate Organization Name only if it’s a distinct key and differs conceptually
+  // If your data already uses OrganizationName and we used it as Name, don't duplicate it.
+  if (keyOrg !== keyDisplayName) {
+    resourceForm.appendChild(buildTextField(keyOrg, "Organization Name", getValue(data, [keyOrg]), false));
+  }
+
+  // 3) OPTIONAL: Title (only if it exists historically in your docs OR you want it)
+  // If Title exists in doc OR you explicitly want it, keep it available (not required)
+  const titleExisting = Object.prototype.hasOwnProperty.call(data, keyTitle);
+  if (titleExisting) {
+    resourceForm.appendChild(buildTextField(keyTitle, "Title", getValue(data, [keyTitle]), false));
+  }
+
+  // 4) Description
+  resourceForm.appendChild(buildTextArea(keyDescription, "Description", getValue(data, [keyDescription])));
+
+  // 5) Categories + nested subcategories (your exact requirement)
+  resourceForm.appendChild(
+    buildNestedCategorySelector(
+      keyCategories,
+      keySubcategories,
+      "Categories & Subcategories",
+      parseCsv(getValue(data, [keyCategories])),
+      parseCsv(getValue(data, [keySubcategories]))
+    )
+  );
+
+  // 6) Keywords (not near the top)
+  resourceForm.appendChild(buildTextField(keyKeywords, "Keywords", getValue(data, [keyKeywords]), false));
+
+  // 7) Contact
+  resourceForm.appendChild(buildTextField(keyWebsite, "Website", getValue(data, [keyWebsite]), false));
+  resourceForm.appendChild(buildTextField(keyPhone, "Phone", getValue(data, [keyPhone]), false));
+  resourceForm.appendChild(buildTextField(keyEmail, "Email", getValue(data, [keyEmail]), false));
+
+  // 8) Address block (logical order; zip near address)
+  resourceForm.appendChild(buildTextField(keyAddress1, "Address", getValue(data, [keyAddress1]), false));
+  resourceForm.appendChild(buildTextField(keyAddress2, "Address Line 2", getValue(data, [keyAddress2]), false));
+  resourceForm.appendChild(buildTextField(keyCity, "City", getValue(data, [keyCity]), false));
+  resourceForm.appendChild(buildTextField(keyState, "State", getValue(data, [keyState]), false));
+  resourceForm.appendChild(buildTextField(keyZip, "Zip Code", getValue(data, [keyZip]), false));
+
+  // 9) Program details
+  resourceForm.appendChild(buildTextField(keyHours, "Hours", getValue(data, [keyHours]), false));
+  resourceForm.appendChild(buildTextField(keyEligibility, "Eligibility", getValue(data, [keyEligibility]), false));
+  resourceForm.appendChild(buildTextField(keyLanguages, "Languages", getValue(data, [keyLanguages]), false));
+
+  // 10) Notes (last, multiline)
+  resourceForm.appendChild(buildTextArea(keyNotes, "Notes", getValue(data, [keyNotes]), { minHeight: 120 }));
+}
+
+function buildTextField(fieldKey, label, value, required = false) {
+  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey } });
+  const lbl = createEl("label", { className: "field-label", text: label });
+  const input = createEl("input", { attrs: { type: "text" } });
+
+  input.value = normalizeString(value);
+  if (required) input.required = true;
+
+  wrap.appendChild(lbl);
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function buildTextArea(fieldKey, label, value, opts = {}) {
+  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey } });
+  const lbl = createEl("label", { className: "field-label", text: label });
+  const ta = createEl("textarea");
+
+  ta.value = normalizeString(value);
+  if (opts.minHeight) ta.style.minHeight = `${opts.minHeight}px`;
+
+  wrap.appendChild(lbl);
+  wrap.appendChild(ta);
+  return wrap;
+}
+
+/**
+ * SRM requirement:
+ * - Categories = checkboxes (only categories)
+ * - When a category checked, show subcategories directly beneath that category
+ * - Both are multi-select
+ */
+function buildNestedCategorySelector(catFieldKey, subFieldKey, label, selectedCategories, selectedSubcategories) {
+  const wrapper = createEl("div", {
+    className: "field-group",
+    attrs: {
+      "data-field": "__nested_categories__",
+      "data-cat-field": catFieldKey,
+      "data-sub-field": subFieldKey,
+    }
   });
+
+  const lbl = createEl("div", { className: "field-label", text: label });
+  wrapper.appendChild(lbl);
+
+  const selectedCatSet = new Set((selectedCategories || []).map(s => s.toLowerCase()));
+  const selectedSubSet = new Set((selectedSubcategories || []).map(s => s.toLowerCase()));
+
+  const container = createEl("div", { className: "cat-nested" });
+
+  // stable order
+  const cats = [...categoryMeta].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  cats.forEach(cat => {
+    const catName = normalizeString(cat.name);
+    if (!catName) return;
+
+    const block = createEl("div", { className: "cat-block" });
+
+    // Category row
+    const catRow = createEl("label", { className: "cat-row" });
+    const catCb = createEl("input", { attrs: { type: "checkbox" } });
+    catCb.value = catName;
+    catCb.checked = selectedCatSet.has(catName.toLowerCase());
+
+    const catText = createEl("span", { text: catName });
+
+    catRow.appendChild(catCb);
+    catRow.appendChild(catText);
+    block.appendChild(catRow);
+
+    // Subcategories container (only visible if category checked)
+    const subsWrap = createEl("div", { className: "cat-subs" });
+
+    const subs = (cat.subcategories || [])
+      .map(s => normalizeString(s))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    if (subs.length) {
+      const subList = createEl("div", { className: "cat-sub-list" });
+
+      subs.forEach(sub => {
+        const subRow = createEl("label", { className: "cat-sub-row" });
+        const subCb = createEl("input", { attrs: { type: "checkbox" } });
+        subCb.value = sub;
+
+        // Only allow checked if parent category checked
+        const shouldCheck = catCb.checked && selectedSubSet.has(sub.toLowerCase());
+        subCb.checked = shouldCheck;
+        subCb.disabled = !catCb.checked;
+
+        const subText = createEl("span", { text: sub });
+        subRow.appendChild(subCb);
+        subRow.appendChild(subText);
+        subList.appendChild(subRow);
+      });
+
+      subsWrap.appendChild(subList);
+    } else {
+      subsWrap.appendChild(createEl("div", { className: "cat-sub-empty", text: "(No subcategories)" }));
+    }
+
+    // toggle visibility + enable/disable subs
+    function syncSubsUI() {
+      if (catCb.checked) {
+        subsWrap.style.display = "block";
+        subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => (cb.disabled = false));
+      } else {
+        subsWrap.style.display = "none";
+        // uncheck & disable subs when category unchecked
+        subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          cb.checked = false;
+          cb.disabled = true;
+        });
+      }
+    }
+
+    catCb.addEventListener("change", syncSubsUI);
+
+    block.appendChild(subsWrap);
+    container.appendChild(block);
+
+    // initial sync
+    syncSubsUI();
+  });
+
+  wrapper.appendChild(container);
+  return wrapper;
 }
 
-if (cancelResourceBtn) {
-  cancelResourceBtn.addEventListener("click", () => hide(resourceEditor));
+function collectResourceFormPayload() {
+  const payload = {};
+
+  const groups = Array.from(resourceForm.querySelectorAll(".field-group"));
+
+  for (const g of groups) {
+    const field = g.dataset.field;
+
+    // special nested categories block
+    if (field === "__nested_categories__") {
+      const catField = g.dataset.catField;
+      const subField = g.dataset.subField;
+
+      const selectedCats = [];
+      const selectedSubs = [];
+
+      const blocks = Array.from(g.querySelectorAll(".cat-block"));
+      blocks.forEach(block => {
+        const catCb = block.querySelector(".cat-row input[type='checkbox']");
+        if (catCb?.checked) {
+          selectedCats.push(catCb.value);
+          const subCbs = Array.from(block.querySelectorAll(".cat-sub-row input[type='checkbox']"));
+          subCbs.forEach(scb => {
+            if (scb.checked) selectedSubs.push(scb.value);
+          });
+        }
+      });
+
+      payload[catField] = toCsv(selectedCats);
+      payload[subField] = toCsv(selectedSubs);
+      continue;
+    }
+
+    const input = g.querySelector("input, textarea, select");
+    if (!input) continue;
+    payload[field] = input.value ?? "";
+  }
+
+  return payload;
 }
 
-if (saveResourceBtn) {
-  saveResourceBtn.addEventListener("click", async () => {
-    if (!resourceForm) return;
+saveResourceBtn?.addEventListener("click", async () => {
+  const payload = collectResourceFormPayload();
 
-    const obj = {};
+  // minimal validation: Name must exist (first field is required already)
+  // if browser validity fails, stop
+  const requiredInputs = Array.from(resourceForm.querySelectorAll("input[required]"));
+  for (const ri of requiredInputs) {
+    if (typeof ri.checkValidity === "function" && !ri.checkValidity()) {
+      ri.reportValidity?.();
+      return;
+    }
+  }
 
-    // Regular inputs/textareas
-    const inputs = resourceForm.querySelectorAll("input[data-field], textarea[data-field]");
-    inputs.forEach(el => {
-      const key = el.dataset.field;
-      obj[key] = String(el.value ?? "");
+  try {
+    if (editingResourceId) {
+      await updateDoc(doc(db, "resources", editingResourceId), payload);
+    } else {
+      await addDoc(collection(db, "resources"), payload);
+    }
+    hide(resourceEditor);
+    await loadResources();
+  } catch (err) {
+    console.error("Error saving resource:", err);
+    alert("Error saving resource. See console for details.");
+  }
+});
+
+deleteResourceBtn?.addEventListener("click", async () => {
+  if (!editingResourceId) return;
+  if (!confirm("Delete this resource?")) return;
+
+  try {
+    await deleteDoc(doc(db, "resources", editingResourceId));
+    hide(resourceEditor);
+    await loadResources();
+  } catch (err) {
+    console.error("Error deleting resource:", err);
+    alert("Error deleting resource. See console for details.");
+  }
+});
+
+// ------------------------------------------------------
+// CATEGORIES (CRUD)
+// ------------------------------------------------------
+async function loadCategories() {
+  categoryList.textContent = "Loading…";
+  categoryMeta = [];
+
+  try {
+    const snap = await getDocs(collection(db, "categories"));
+    const cats = [];
+    snap.forEach(ds => {
+      const d = ds.data() || {};
+      cats.push({
+        id: ds.id,
+        name: normalizeString(d.name),
+        subcategories: Array.isArray(d.subcategories) ? d.subcategories : [],
+      });
     });
 
-    // Category/Subcategory selector (revamped)
-    const selectorEl = resourceForm.querySelector(".cat-selector")?.closest(".field-group");
-    if (selectorEl) {
-      const {
-        categoriesKey,
-        subcategoriesKey,
-        selectedCategories,
-        selectedSubcategories,
-        originalCategoriesValue,
-        originalSubcategoriesValue
-      } = collectCategorySubcategorySelector(selectorEl);
+    cats.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    categoryMeta = cats;
+    renderCategoryList(cats);
+  } catch (err) {
+    console.error("Error loading categories:", err);
+    categoryList.textContent = "Error loading categories.";
+  }
+}
 
-      obj[categoriesKey] = serializeByOriginalType(originalCategoriesValue, selectedCategories);
-      obj[subcategoriesKey] = serializeByOriginalType(originalSubcategoriesValue, selectedSubcategories);
-    }
+function renderCategoryList(cats) {
+  clear(categoryList);
 
-    try {
-      if (editingResourceId) {
-        await updateDoc(doc(db, "resources", editingResourceId), obj);
-      } else {
-        await addDoc(collection(db, "resources"), obj);
-      }
-      hide(resourceEditor);
-      await loadResources();
-    } catch (err) {
-      console.error("Error saving resource:", err);
-      alert("Error saving resource. See console for details.");
-    }
+  if (!cats.length) {
+    categoryList.textContent = "No categories defined.";
+    return;
+  }
+
+  cats.forEach(cat => {
+    const row = createEl("div", { className: "list-row", text: cat.name || "(Unnamed)" });
+    row.addEventListener("click", () => openCategoryEditor(cat));
+    categoryList.appendChild(row);
   });
 }
 
-if (deleteResourceBtn) {
-  deleteResourceBtn.addEventListener("click", async () => {
-    if (!editingResourceId) return;
-    if (!window.confirm("Delete this resource?")) return;
+function openCategoryEditor(cat) {
+  editingCategoryId = cat?.id || null;
+  categoryEditorTitle.textContent = editingCategoryId ? "Edit Category" : "Add Category";
 
-    try {
-      await deleteDoc(doc(db, "resources", editingResourceId));
-      hide(resourceEditor);
-      await loadResources();
-    } catch (err) {
-      console.error("Error deleting resource:", err);
-      alert("Error deleting resource. See console for details.");
-    }
+  categoryNameInput.value = cat?.name || "";
+  renderSubcategoryEditorRows(cat?.subcategories || []);
+
+  show(categoryEditor);
+}
+
+function renderSubcategoryEditorRows(subs) {
+  clear(subcategoryList);
+
+  (subs || []).forEach((s) => {
+    const row = createEl("div", { className: "sub-row" });
+    const input = createEl("input", { className: "sub-input", attrs: { type: "text" } });
+    input.value = normalizeString(s);
+
+    const del = createEl("button", { className: "sub-delete-btn", text: "Remove" });
+    del.addEventListener("click", () => row.remove());
+
+    row.appendChild(input);
+    row.appendChild(del);
+    subcategoryList.appendChild(row);
   });
 }
+
+addSubBtn?.addEventListener("click", () => {
+  const row = createEl("div", { className: "sub-row" });
+  const input = createEl("input", { className: "sub-input", attrs: { type: "text" } });
+  input.value = "";
+
+  const del = createEl("button", { className: "sub-delete-btn", text: "Remove" });
+  del.addEventListener("click", () => row.remove());
+
+  row.appendChild(input);
+  row.appendChild(del);
+  subcategoryList.appendChild(row);
+});
+
+addCategoryBtn?.addEventListener("click", () => {
+  openCategoryEditor(null);
+});
+
+cancelCategoryBtn?.addEventListener("click", () => {
+  hide(categoryEditor);
+});
+
+saveCategoryBtn?.addEventListener("click", async () => {
+  const name = normalizeString(categoryNameInput.value);
+  if (!name) {
+    alert("Category name is required.");
+    return;
+  }
+
+  const subs = Array.from(subcategoryList.querySelectorAll("input"))
+    .map(i => normalizeString(i.value))
+    .filter(Boolean);
+
+  const payload = { name, subcategories: subs };
+
+  try {
+    if (editingCategoryId) {
+      await updateDoc(doc(db, "categories", editingCategoryId), payload);
+    } else {
+      await addDoc(collection(db, "categories"), payload);
+    }
+    hide(categoryEditor);
+    await loadCategories();
+    await loadResources(); // keep nested selector in sync
+  } catch (err) {
+    console.error("Error saving category:", err);
+    alert("Error saving category. See console for details.");
+  }
+});
+
+deleteCategoryBtn?.addEventListener("click", async () => {
+  if (!editingCategoryId) return;
+  if (!confirm("Delete this category?")) return;
+
+  try {
+    await deleteDoc(doc(db, "categories", editingCategoryId));
+    hide(categoryEditor);
+    await loadCategories();
+    await loadResources();
+  } catch (err) {
+    console.error("Error deleting category:", err);
+    alert("Error deleting category. See console for details.");
+  }
+});
