@@ -73,7 +73,7 @@ let editingCategoryId = null;
 
 /**
  * categoryMeta: [{ id, name, subcategories: string[] }]
- * This comes from /categories docs: { name: string, subcategories: string[] }
+ * /categories docs: { name: string, subcategories: string[] }
  */
 let categoryMeta = [];
 
@@ -117,6 +117,18 @@ function createEl(tag, opts = {}) {
 function isAdminUser(user) {
   const email = normalizeString(user?.email).toLowerCase();
   return email === ADMIN_EMAIL.toLowerCase();
+}
+
+// Date helpers (SRM: store in Firestore as YYYY-MM-DD string)
+function toDateInputValue(v) {
+  const s = normalizeString(v);
+  if (!s) return "";
+  // If already YYYY-MM-DD, accept.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // Otherwise do not guess-convert unknown formats. Show blank to avoid corrupting data.
+  // (You can standardize values in Firestore if needed.)
+  return "";
 }
 
 // ------------------------------------------------------
@@ -169,7 +181,6 @@ onAuthStateChanged(auth, async (user) => {
 
   initNav();
 
-  // Load categories first because resource editor needs them for nested selector
   await loadCategories();
   await loadResources();
 });
@@ -182,7 +193,6 @@ function initNav() {
     btn.addEventListener("click", () => setActivePanel(btn.dataset.panel));
   });
 
-  // Default: Resources
   setActivePanel("resources");
 }
 
@@ -203,13 +213,12 @@ function setActivePanel(panelName) {
 // ------------------------------------------------------
 // RESOURCES
 // ------------------------------------------------------
-// SRM: Resource name is Organization (per your doc). We do not guess alternatives.
+// SRM: Resource name is Organization (per your schema).
 function getResourceDisplayName(resource) {
   return normalizeString(resource?.Organization) || "(Unnamed)";
 }
 
 async function loadResources() {
-  // IMPORTANT: do NOT clear resourceEditor container (that breaks the right panel)
   hide(resourceEditor);
   editingResourceId = null;
 
@@ -267,7 +276,7 @@ cancelResourceBtn?.addEventListener("click", () => {
 });
 
 // ------------------------------------------------------
-// Resource Form (SRM: uses the fields you provided)
+// Resource Form Fields
 // ------------------------------------------------------
 function buildFieldText(fieldKey, label, value = "", required = false) {
   const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "text" } });
@@ -282,24 +291,68 @@ function buildFieldText(fieldKey, label, value = "", required = false) {
   return wrap;
 }
 
-function buildFieldTextarea(fieldKey, label, value = "") {
-  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "textarea" } });
+function buildFieldDate(fieldKey, label, value = "") {
+  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "date" } });
   const lbl = createEl("label", { className: "field-label", text: label });
-  const ta = createEl("textarea");
+  const input = createEl("input", { attrs: { type: "date" } });
 
-  ta.value = normalizeString(value);
+  input.value = toDateInputValue(value);
 
   wrap.appendChild(lbl);
-  wrap.appendChild(ta);
+  wrap.appendChild(input);
+  return wrap;
+}
+
+// Basic Rich Text Editor (SRM: bold/italic/underline + bullets/numbered)
+function buildFieldRichText(fieldKey, label, htmlValue = "") {
+  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "richtext" } });
+  const lbl = createEl("label", { className: "field-label", text: label });
+
+  const toolbar = createEl("div", { className: "rte-toolbar" });
+  const editor = createEl("div", { className: "rte-editor", attrs: { contenteditable: "true" } });
+
+  // Initialize content
+  editor.innerHTML = normalizeString(htmlValue) || "";
+
+  function cmd(command) {
+    editor.focus();
+    // execCommand is legacy but widely supported; SRM: minimal, no dependency assumptions
+    document.execCommand(command, false, null);
+  }
+
+  const btnBold = createEl("button", { className: "rte-btn", text: "B", attrs: { type: "button", title: "Bold" } });
+  btnBold.addEventListener("click", () => cmd("bold"));
+
+  const btnItalic = createEl("button", { className: "rte-btn", text: "I", attrs: { type: "button", title: "Italic" } });
+  btnItalic.addEventListener("click", () => cmd("italic"));
+
+  const btnUnderline = createEl("button", { className: "rte-btn", text: "U", attrs: { type: "button", title: "Underline" } });
+  btnUnderline.addEventListener("click", () => cmd("underline"));
+
+  const btnBullets = createEl("button", { className: "rte-btn", text: "•", attrs: { type: "button", title: "Bulleted List" } });
+  btnBullets.addEventListener("click", () => cmd("insertUnorderedList"));
+
+  const btnNumbers = createEl("button", { className: "rte-btn", text: "1.", attrs: { type: "button", title: "Numbered List" } });
+  btnNumbers.addEventListener("click", () => cmd("insertOrderedList"));
+
+  toolbar.appendChild(btnBold);
+  toolbar.appendChild(btnItalic);
+  toolbar.appendChild(btnUnderline);
+  toolbar.appendChild(btnBullets);
+  toolbar.appendChild(btnNumbers);
+
+  wrap.appendChild(lbl);
+  wrap.appendChild(toolbar);
+  wrap.appendChild(editor);
   return wrap;
 }
 
 /**
  * SRM requirement:
  * - Categories = checkboxes (ONLY categories)
- * - When a category checked, show its subcategories directly under that category
+ * - When checked, show subcategories directly below that category
  * - Multi-select for both
- * Storage (SRM: match your schema): Categories/Subcategories are string fields
+ * Storage: Categories/Subcategories are string fields
  */
 function buildNestedCategorySelector(selectedCategories, selectedSubcategories) {
   const wrapper = createEl("div", {
@@ -387,16 +440,19 @@ function buildNestedCategorySelector(selectedCategories, selectedSubcategories) 
   return wrapper;
 }
 
+// ------------------------------------------------------
+// Build resource editor form (SRM schema + SRM order)
+// ------------------------------------------------------
 function buildResourceForm(data) {
   clearChildren(resourceForm);
 
-  // SRM: field order is logical; notes last; notes is multiline
-  // SRM: primary name is Organization (your doc shows this is populated)
+  // Name
   resourceForm.appendChild(buildFieldText("Organization", "Organization", data.Organization || "", true));
 
-  resourceForm.appendChild(buildFieldTextarea("Description", "Description", data.Description || ""));
+  // Rich text fields
+  resourceForm.appendChild(buildFieldRichText("Description", "Description", data.Description || ""));
 
-  // Categories & Subcategories
+  // Categories
   resourceForm.appendChild(
     buildNestedCategorySelector(
       parseCsvString(data.Categories || ""),
@@ -404,7 +460,7 @@ function buildResourceForm(data) {
     )
   );
 
-  // Keywords (not at the top)
+  // Keywords
   resourceForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
 
   // Contact
@@ -412,10 +468,9 @@ function buildResourceForm(data) {
   resourceForm.appendChild(buildFieldText("Phone", "Phone", data.Phone || "", false));
   resourceForm.appendChild(buildFieldText("Email", "Email", data.Email || "", false));
 
-  // Address block
+  // Address
   resourceForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
   resourceForm.appendChild(buildFieldText("City", "City", data.City || "", false));
-  // Your sample doc doesn’t show State, so we do NOT add it.
   resourceForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
 
   // Program/metadata
@@ -423,17 +478,16 @@ function buildResourceForm(data) {
   resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
   resourceForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
   resourceForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
-  resourceForm.appendChild(buildFieldText("Last Verified", "Last Verified", data["Last Verified"] || "", false));
+
+  // SRM: Last Verified is a date field
+  resourceForm.appendChild(buildFieldDate("Last Verified", "Last Verified", data["Last Verified"] || ""));
+
   resourceForm.appendChild(buildFieldText("UpdatedBy", "Updated By", data.UpdatedBy || "", false));
 
-  // Notes LAST, multiline
-  const notes = buildFieldTextarea("Notes", "Notes", data.Notes || "");
-  const ta = notes.querySelector("textarea");
-  if (ta) ta.style.minHeight = "140px";
-  resourceForm.appendChild(notes);
+  // Notes LAST, rich text
+  resourceForm.appendChild(buildFieldRichText("Notes", "Notes", data.Notes || ""));
 
-  // If Title / OrganizationName exist in data, we keep them editable at the VERY end
-  // (SRM: these keys exist in your doc; we do not remove them)
+  // Keep existing fields present in your schema
   resourceForm.appendChild(buildFieldText("Title", "Title", data.Title || "", false));
   resourceForm.appendChild(buildFieldText("OrganizationName", "OrganizationName", data.OrganizationName || "", false));
 }
@@ -444,8 +498,8 @@ function collectResourcePayload() {
   const groups = Array.from(resourceForm.querySelectorAll(".field-group"));
   for (const g of groups) {
     const field = g.dataset.field;
+    const type = g.dataset.type;
 
-    // nested category selector
     if (field === "__nested_categories__") {
       const selectedCats = [];
       const selectedSubs = [];
@@ -468,6 +522,12 @@ function collectResourcePayload() {
       continue;
     }
 
+    if (type === "richtext") {
+      const editor = g.querySelector(".rte-editor");
+      payload[field] = editor ? editor.innerHTML : "";
+      continue;
+    }
+
     const input = g.querySelector("input, textarea");
     payload[field] = input ? input.value : "";
   }
@@ -476,10 +536,10 @@ function collectResourcePayload() {
 }
 
 saveResourceBtn?.addEventListener("click", async () => {
-  // Required field validation (Organization)
-  const orgGroup = resourceForm.querySelector('.field-group[data-field="Organization"] input');
-  if (orgGroup && typeof orgGroup.checkValidity === "function" && !orgGroup.checkValidity()) {
-    orgGroup.reportValidity?.();
+  // Validate required Organization
+  const orgInput = resourceForm.querySelector('.field-group[data-field="Organization"] input');
+  if (orgInput && typeof orgInput.checkValidity === "function" && !orgInput.checkValidity()) {
+    orgInput.reportValidity?.();
     return;
   }
 
@@ -625,7 +685,7 @@ saveCategoryBtn?.addEventListener("click", async () => {
     }
     hide(categoryEditor);
     await loadCategories();
-    await loadResources(); // keep resource editor selector up to date
+    await loadResources();
   } catch (err) {
     console.error("Error saving category:", err);
     alert("Error saving category. See console for details.");
