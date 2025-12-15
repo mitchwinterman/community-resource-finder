@@ -93,17 +93,6 @@ function clearChildren(el) {
 function normalizeString(v) {
   return String(v ?? "").trim();
 }
-function parseCsvString(v) {
-  const s = normalizeString(v);
-  if (!s) return [];
-  return s
-    .split(",")
-    .map(x => x.trim())
-    .filter(Boolean);
-}
-function toCsvString(arr) {
-  return (arr || []).map(x => normalizeString(x)).filter(Boolean).join(", ");
-}
 function createEl(tag, opts = {}) {
   const el = document.createElement(tag);
   if (opts.className) el.className = opts.className;
@@ -123,12 +112,48 @@ function isAdminUser(user) {
 function toDateInputValue(v) {
   const s = normalizeString(v);
   if (!s) return "";
-  // If already YYYY-MM-DD, accept.
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-  // Otherwise do not guess-convert unknown formats. Show blank to avoid corrupting data.
-  // (You can standardize values in Firestore if needed.)
   return "";
+}
+
+/**
+ * SRM-critical fix:
+ * Categories/Subcategories are stored as STRING fields, but category names can contain commas.
+ * So we CANNOT parse by split(",").
+ *
+ * Instead: match known option strings against the stored field value.
+ * This is safe given your schema: options come from Firestore categories docs.
+ */
+function parseSelectionsByMatching(storedValue, options) {
+  const raw = normalizeString(storedValue);
+  if (!raw) return [];
+
+  const hay = raw.toLowerCase();
+  const opts = (options || [])
+    .map(x => normalizeString(x))
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length); // longest first
+
+  const found = [];
+  const used = new Set();
+
+  for (const opt of opts) {
+    const key = opt.toLowerCase();
+    if (used.has(key)) continue;
+
+    if (hay.includes(key)) {
+      found.push(opt);
+      used.add(key);
+    }
+  }
+
+  return found;
+}
+
+function joinAsDisplayString(arr) {
+  // Keep existing Firestore format: comma+space.
+  // We do NOT change storage format because main site may rely on this.
+  return (arr || []).map(x => normalizeString(x)).filter(Boolean).join(", ");
 }
 
 // ------------------------------------------------------
@@ -213,7 +238,6 @@ function setActivePanel(panelName) {
 // ------------------------------------------------------
 // RESOURCES
 // ------------------------------------------------------
-// SRM: Resource name is Organization (per your schema).
 function getResourceDisplayName(resource) {
   return normalizeString(resource?.Organization) || "(Unnamed)";
 }
@@ -303,7 +327,6 @@ function buildFieldDate(fieldKey, label, value = "") {
   return wrap;
 }
 
-// Basic Rich Text Editor (SRM: bold/italic/underline + bullets/numbered)
 function buildFieldRichText(fieldKey, label, htmlValue = "") {
   const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "richtext" } });
   const lbl = createEl("label", { className: "field-label", text: label });
@@ -311,12 +334,10 @@ function buildFieldRichText(fieldKey, label, htmlValue = "") {
   const toolbar = createEl("div", { className: "rte-toolbar" });
   const editor = createEl("div", { className: "rte-editor", attrs: { contenteditable: "true" } });
 
-  // Initialize content
   editor.innerHTML = normalizeString(htmlValue) || "";
 
   function cmd(command) {
     editor.focus();
-    // execCommand is legacy but widely supported; SRM: minimal, no dependency assumptions
     document.execCommand(command, false, null);
   }
 
@@ -348,29 +369,42 @@ function buildFieldRichText(fieldKey, label, htmlValue = "") {
 }
 
 /**
- * SRM requirement:
+ * SRM requirement + refinement:
  * - Categories = checkboxes (ONLY categories)
- * - When checked, show subcategories directly below that category
+ * - Subcategories appear directly under their category
  * - Multi-select for both
- * Storage: Categories/Subcategories are string fields
+ * - NEW: expand/collapse subcategories WITHOUT selecting the category
+ *
+ * Storage in Firestore remains string fields:
+ *   Categories: "A, B"
+ *   Subcategories: "X, Y"
+ *
+ * Critical fix: we do NOT split by comma because category names include commas.
  */
-function buildNestedCategorySelector(selectedCategories, selectedSubcategories) {
+function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr) {
   const wrapper = createEl("div", {
     className: "field-group",
     attrs: {
       "data-field": "__nested_categories__",
-      "data-cat-field": "Categories",
-      "data-sub-field": "Subcategories",
+      "data-type": "nestedcats"
     }
   });
 
   const lbl = createEl("div", { className: "field-label", text: "Categories & Subcategories" });
   wrapper.appendChild(lbl);
 
-  const selectedCatSet = new Set((selectedCategories || []).map(x => x.toLowerCase()));
-  const selectedSubSet = new Set((selectedSubcategories || []).map(x => x.toLowerCase()));
-
   const container = createEl("div", { className: "cat-nested" });
+
+  const allCategoryNames = categoryMeta.map(c => c.name).filter(Boolean);
+  const allSubNames = Array.from(
+    new Set(categoryMeta.flatMap(c => (c.subcategories || []).map(s => normalizeString(s)).filter(Boolean)))
+  );
+
+  const selectedCats = parseSelectionsByMatching(storedCategoriesStr, allCategoryNames);
+  const selectedSubs = parseSelectionsByMatching(storedSubcategoriesStr, allSubNames);
+
+  const selectedCatSet = new Set(selectedCats.map(x => x.toLowerCase()));
+  const selectedSubSet = new Set(selectedSubs.map(x => x.toLowerCase()));
 
   const cats = [...categoryMeta].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   cats.forEach(cat => {
@@ -379,15 +413,28 @@ function buildNestedCategorySelector(selectedCategories, selectedSubcategories) 
 
     const block = createEl("div", { className: "cat-block" });
 
-    const catRow = createEl("label", { className: "cat-row" });
+    // Header = checkbox label + expand/collapse button (button is NOT inside label)
+    const header = createEl("div", { className: "cat-header" });
+
+    const catLabel = createEl("label", { className: "cat-row" });
     const catCb = createEl("input", { attrs: { type: "checkbox" } });
     catCb.value = catName;
     catCb.checked = selectedCatSet.has(catName.toLowerCase());
 
-    catRow.appendChild(catCb);
-    catRow.appendChild(createEl("span", { text: catName }));
-    block.appendChild(catRow);
+    catLabel.appendChild(catCb);
+    catLabel.appendChild(createEl("span", { text: catName }));
 
+    const toggleBtn = createEl("button", {
+      className: "cat-toggle-btn",
+      text: "Show",
+      attrs: { type: "button", "aria-expanded": "false" }
+    });
+
+    header.appendChild(catLabel);
+    header.appendChild(toggleBtn);
+    block.appendChild(header);
+
+    // Subcategories wrapper
     const subsWrap = createEl("div", { className: "cat-subs" });
 
     const subs = (cat.subcategories || [])
@@ -403,7 +450,9 @@ function buildNestedCategorySelector(selectedCategories, selectedSubcategories) 
         const subCb = createEl("input", { attrs: { type: "checkbox" } });
         subCb.value = sub;
 
+        // Keep checked if stored and category is selected
         subCb.checked = catCb.checked && selectedSubSet.has(sub.toLowerCase());
+        // Disabled unless category is selected
         subCb.disabled = !catCb.checked;
 
         subRow.appendChild(subCb);
@@ -416,23 +465,45 @@ function buildNestedCategorySelector(selectedCategories, selectedSubcategories) 
       subsWrap.appendChild(createEl("div", { className: "cat-sub-empty", text: "(No subcategories)" }));
     }
 
+    // Expand/collapse state:
+    // - independent of checkbox
+    // - but if checkbox is checked, we force visible (so user can select subs)
+    let expanded = false;
+
     function syncSubsUI() {
-      if (catCb.checked) {
-        subsWrap.style.display = "block";
-        subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => (cb.disabled = false));
-      } else {
-        subsWrap.style.display = "none";
-        subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-          cb.checked = false;
-          cb.disabled = true;
-        });
-      }
+      const forceVisible = catCb.checked;
+      const shouldShow = forceVisible || expanded;
+
+      subsWrap.style.display = shouldShow ? "block" : "none";
+
+      // Enable sub-checkboxes only when category checked
+      subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.disabled = !catCb.checked;
+        if (!catCb.checked) cb.checked = false; // SRM: no subcategories without the parent category
+      });
+
+      // Toggle button label reflects expanded state (not the checkbox state)
+      toggleBtn.textContent = expanded ? "Hide" : "Show";
+      toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
     }
 
-    catCb.addEventListener("change", syncSubsUI);
+    toggleBtn.addEventListener("click", () => {
+      expanded = !expanded;
+      syncSubsUI();
+    });
+
+    catCb.addEventListener("change", () => {
+      // If user checks category, show the section (force visible)
+      // If user unchecks, we do not automatically collapse; we keep expanded state.
+      syncSubsUI();
+    });
+
     block.appendChild(subsWrap);
     container.appendChild(block);
 
+    // Initial render:
+    // If category is already selected, show subs.
+    expanded = false;
     syncSubsUI();
   });
 
@@ -446,61 +517,45 @@ function buildNestedCategorySelector(selectedCategories, selectedSubcategories) 
 function buildResourceForm(data) {
   clearChildren(resourceForm);
 
-  // Name
   resourceForm.appendChild(buildFieldText("Organization", "Organization", data.Organization || "", true));
-
-  // Rich text fields
   resourceForm.appendChild(buildFieldRichText("Description", "Description", data.Description || ""));
 
-  // Categories
-  resourceForm.appendChild(
-    buildNestedCategorySelector(
-      parseCsvString(data.Categories || ""),
-      parseCsvString(data.Subcategories || "")
-    )
-  );
+  // IMPORTANT: pass raw stored strings, do NOT parse by comma
+  resourceForm.appendChild(buildNestedCategorySelector(data.Categories || "", data.Subcategories || ""));
 
-  // Keywords
   resourceForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
 
-  // Contact
   resourceForm.appendChild(buildFieldText("Website", "Website", data.Website || "", false));
   resourceForm.appendChild(buildFieldText("Phone", "Phone", data.Phone || "", false));
   resourceForm.appendChild(buildFieldText("Email", "Email", data.Email || "", false));
 
-  // Address
   resourceForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
   resourceForm.appendChild(buildFieldText("City", "City", data.City || "", false));
   resourceForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
 
-  // Program/metadata
   resourceForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
   resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
   resourceForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
   resourceForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
 
-  // SRM: Last Verified is a date field
   resourceForm.appendChild(buildFieldDate("Last Verified", "Last Verified", data["Last Verified"] || ""));
-
   resourceForm.appendChild(buildFieldText("UpdatedBy", "Updated By", data.UpdatedBy || "", false));
 
-  // Notes LAST, rich text
   resourceForm.appendChild(buildFieldRichText("Notes", "Notes", data.Notes || ""));
 
-  // Keep existing fields present in your schema
   resourceForm.appendChild(buildFieldText("Title", "Title", data.Title || "", false));
   resourceForm.appendChild(buildFieldText("OrganizationName", "OrganizationName", data.OrganizationName || "", false));
 }
 
 function collectResourcePayload() {
   const payload = {};
-
   const groups = Array.from(resourceForm.querySelectorAll(".field-group"));
+
   for (const g of groups) {
     const field = g.dataset.field;
     const type = g.dataset.type;
 
-    if (field === "__nested_categories__") {
+    if (field === "__nested_categories__" && type === "nestedcats") {
       const selectedCats = [];
       const selectedSubs = [];
 
@@ -517,8 +572,8 @@ function collectResourcePayload() {
         }
       });
 
-      payload["Categories"] = toCsvString(selectedCats);
-      payload["Subcategories"] = toCsvString(selectedSubs);
+      payload["Categories"] = joinAsDisplayString(selectedCats);
+      payload["Subcategories"] = joinAsDisplayString(selectedSubs);
       continue;
     }
 
@@ -536,7 +591,6 @@ function collectResourcePayload() {
 }
 
 saveResourceBtn?.addEventListener("click", async () => {
-  // Validate required Organization
   const orgInput = resourceForm.querySelector('.field-group[data-field="Organization"] input');
   if (orgInput && typeof orgInput.checkValidity === "function" && !orgInput.checkValidity()) {
     orgInput.reportValidity?.();
