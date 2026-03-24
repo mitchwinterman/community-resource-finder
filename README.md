@@ -2,7 +2,7 @@
 
 Community Resource Finder is a Firebase-backed directory for browsing community services, filtering them by category and subcategory, and maintaining the directory through a browser-based admin panel.
 
-This repository currently contains the public site, the admin interface, the Firebase client configuration, and legacy JSON source files from the original Firestore seed process.
+This repository currently contains the public site, the admin interface, the Firebase client configuration, shared taxonomy normalization rules, and legacy JSON source files from the original Firestore seed process.
 
 ## What This Project Does
 
@@ -36,9 +36,10 @@ Top-level files:
 - `admin.html`: admin login and editing interface
 - `admin.js`: admin authentication and CRUD operations for resources and categories
 - `admin.css`: admin styling
+- `taxonomy-rules.js`: shared taxonomy normalization rules used by the admin category editor
 - `firebase.js`: Firebase app, Firestore, and Auth initialization
 - `data.json`: legacy resource data snapshot retained for reference
-- `categories.json`: legacy category/subcategory snapshot retained for reference
+- `categories.json`: canonical category/subcategory snapshot retained for reference
 - `crf-logo.png`: Community Resource Finder logo
 - `wcls-logo.png`: Washoe County Library System logo
 
@@ -371,6 +372,8 @@ The admin resource editor uses a nested category selector:
 
 Selected categories and subcategories are saved back to Firestore as arrays.
 
+When saving categories, known deprecated subcategory labels are automatically normalized to the current canonical labels.
+
 ### Category Management
 
 The Categories panel allows staff to:
@@ -435,8 +438,7 @@ The current dataset appears to contain some inconsistent values, placeholder bla
 
 - blank fields represented as `" "` instead of empty strings
 - multiple websites stored in a single `Website` field
-- inconsistent capitalization in some subcategories
-- taxonomy entries in `categories.json` with formatting artifacts
+- the legacy `data.json` snapshot may not match the cleaned live taxonomy exactly
 
 Treat the data model as operationally useful but not yet normalized.
 
@@ -515,7 +517,7 @@ If you are actively maintaining this project, the highest-value follow-up work i
 
 1. add Firestore rules and document them in the repo
 2. replace `mailto:` contact flow with a real submission backend
-3. add a data validation and cleanup process for the taxonomy and imported records
+3. keep the taxonomy vocabulary normalized and aligned between Firestore and `categories.json`
 
 ## Maintenance Ownership Notes
 

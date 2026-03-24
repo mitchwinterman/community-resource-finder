@@ -18,6 +18,10 @@ import {
   signOut,
   onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import {
+  canonicalizeSubcategoryInput,
+  formatNormalizationChange
+} from "./taxonomy-rules.js";
 
 // ------------------------------------------------------
 // CONFIG
@@ -743,9 +747,11 @@ saveCategoryBtn?.addEventListener("click", async () => {
     return;
   }
 
-  const subs = Array.from(subcategoryList.querySelectorAll("input"))
+  const rawSubs = Array.from(subcategoryList.querySelectorAll("input"))
     .map(i => normalizeString(i.value))
     .filter(Boolean);
+  const normalizedSubs = canonicalizeSubcategoryInput(rawSubs);
+  const subs = normalizedSubs.values;
 
   const payload = { name, subcategories: subs };
 
@@ -758,6 +764,17 @@ saveCategoryBtn?.addEventListener("click", async () => {
     hide(categoryEditor);
     await loadCategories();
     await loadResources();
+    if (normalizedSubs.changes.length > 0) {
+      const preview = normalizedSubs.changes
+        .slice(0, 8)
+        .map(change => `- ${formatNormalizationChange(change)}`)
+        .join("\n");
+      const suffix = normalizedSubs.changes.length > 8
+        ? `\n- ...and ${normalizedSubs.changes.length - 8} more`
+        : "";
+
+      alert(`Subcategories were normalized before save:\n${preview}${suffix}`);
+    }
   } catch (err) {
     console.error("Error saving category:", err);
     alert("Error saving category. See console for details.");
