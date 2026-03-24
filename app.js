@@ -1,4 +1,4 @@
-// app.js — frontend for Community Resource Finder (Firestore-backed)
+// app.js - frontend for Community Resource Finder (Firestore-backed)
 
 import { db } from "./firebase.js";
 import {
@@ -14,8 +14,7 @@ async function loadData() {
         const snap = await getDocs(collection(db, "resources"));
         const list = [];
         snap.forEach(docSnap => {
-            const data = docSnap.data();
-            list.push(data);
+            list.push(docSnap.data());
         });
         return list;
     } catch (err) {
@@ -28,14 +27,12 @@ async function loadData() {
 async function loadCategories() {
     try {
         const snap = await getDocs(collection(db, "categories"));
-        // Build structure like: { "Category Name": ["Sub1", "Sub2"], ... }
         const rawCats = {};
         snap.forEach(docSnap => {
             const data = docSnap.data();
-            const name = (data.name || "").trim();
+            const name = normalizeString(data.name);
             if (!name) return;
-            const subs = Array.isArray(data.subcategories) ? data.subcategories : [];
-            rawCats[name] = subs;
+            rawCats[name] = Array.isArray(data.subcategories) ? data.subcategories : [];
         });
         return rawCats;
     } catch (err) {
@@ -62,15 +59,13 @@ const resultCountEl = document.getElementById("resultCount");
 // GLOBAL STATE
 // -----------------------------
 let globalData = [];
-let categoryOptions = [];      // [{ value, label }]
-let subcategoryOptions = {};   // { categoryValueLower: [{ value, label }, ...] }
+let categoryOptions = [];
+let subcategoryOptions = {};
 let selectedResourceId = null;
 
 // -----------------------------
 // HELPER FUNCTIONS
 // -----------------------------
-
-// Capitalization overrides for certain subcategories
 const specialSubcategoryCaps = {
     "aba": "ABA",
     "foster care": "Foster Care",
@@ -91,23 +86,219 @@ const specialSubcategoryCaps = {
     "lgbtqia+": "LGBTQIA+"
 };
 
+const allowedRichTextTags = new Set([
+    "A",
+    "B",
+    "BR",
+    "EM",
+    "I",
+    "LI",
+    "OL",
+    "P",
+    "STRONG",
+    "U",
+    "UL"
+]);
+
+function normalizeString(value) {
+    return String(value ?? "").trim();
+}
+
+function normalizeStringArray(value) {
+    if (!Array.isArray(value)) return [];
+    return value.map(item => normalizeString(item)).filter(Boolean);
+}
+
 function formatSubcategoryLabel(label) {
     if (!label) return "";
     const lower = label.toLowerCase();
-    if (specialSubcategoryCaps[lower]) {
-        return specialSubcategoryCaps[lower];
-    }
-    return label;
+    return specialSubcategoryCaps[lower] || label;
 }
 
-function escapeRegExp(string) {
-    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function clearElement(el) {
+    if (!el) return;
+    el.replaceChildren();
+}
+
+function getPlainText(value) {
+    const raw = String(value ?? "");
+    if (!raw) return "";
+
+    const template = document.createElement("template");
+    template.innerHTML = raw;
+    return normalizeString(template.content.textContent || "");
+}
+
+function formatArrayForDisplay(values, formatter = null) {
+    const items = normalizeStringArray(values);
+    return items.map(item => formatter ? formatter(item) : item).join(", ");
+}
+
+function getSafeHref(rawValue, allowBareDomain = false) {
+    const value = normalizeString(rawValue);
+    if (!value) return "";
+
+    const hasScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value);
+    if (!hasScheme) {
+        if (!allowBareDomain || value.startsWith("/") || value.startsWith(".") || /\s/.test(value)) {
+            return "";
+        }
+    }
+
+    const candidate = hasScheme ? value : `https://${value}`;
+
+    try {
+        const url = new URL(candidate);
+        const protocol = url.protocol.toLowerCase();
+        if (!["http:", "https:", "mailto:", "tel:"].includes(protocol)) {
+            return "";
+        }
+        return url.href;
+    } catch {
+        return "";
+    }
+}
+
+function sanitizeHtmlToFragment(html) {
+    const template = document.createElement("template");
+    template.innerHTML = String(html ?? "");
+
+    function sanitizeNode(node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            return document.createTextNode(node.textContent || "");
+        }
+
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+            return document.createDocumentFragment();
+        }
+
+        const tagName = node.tagName.toUpperCase();
+        if (!allowedRichTextTags.has(tagName)) {
+            const fragment = document.createDocumentFragment();
+            Array.from(node.childNodes).forEach(child => {
+                fragment.appendChild(sanitizeNode(child));
+            });
+            return fragment;
+        }
+
+        const clean = document.createElement(tagName.toLowerCase());
+
+        if (tagName === "A") {
+            const safeHref = getSafeHref(node.getAttribute("href"), true);
+            if (!safeHref) {
+                const fragment = document.createDocumentFragment();
+                Array.from(node.childNodes).forEach(child => {
+                    fragment.appendChild(sanitizeNode(child));
+                });
+                return fragment;
+            }
+
+            clean.setAttribute("href", safeHref);
+            if (safeHref.startsWith("http://") || safeHref.startsWith("https://")) {
+                clean.setAttribute("target", "_blank");
+                clean.setAttribute("rel", "noopener noreferrer");
+            }
+        }
+
+        Array.from(node.childNodes).forEach(child => {
+            clean.appendChild(sanitizeNode(child));
+        });
+
+        return clean;
+    }
+
+    const fragment = document.createDocumentFragment();
+    Array.from(template.content.childNodes).forEach(child => {
+        fragment.appendChild(sanitizeNode(child));
+    });
+    return fragment;
+}
+
+function appendSanitizedRichText(container, html) {
+    const richText = normalizeString(html);
+    if (!richText) return false;
+
+    container.appendChild(sanitizeHtmlToFragment(richText));
+    return true;
+}
+
+function createTextBlock(tagName, className, text) {
+    const el = document.createElement(tagName);
+    if (className) el.className = className;
+    el.textContent = text;
+    return el;
+}
+
+function renderDetailsEmptyState() {
+    clearElement(detailsDiv);
+
+    const empty = createTextBlock("div", "details-empty", "Select a resource");
+    empty.appendChild(document.createElement("br"));
+
+    const small = document.createElement("small");
+    small.textContent = "Use the search bar or filters above to find a resource, then click to view full details.";
+    empty.appendChild(small);
+
+    detailsDiv.appendChild(empty);
+}
+
+function renderStatusCard(container, message) {
+    clearElement(container);
+    container.appendChild(createTextBlock("div", "result-card", message));
+}
+
+function appendDetailField(label, value, options = {}) {
+    const field = document.createElement("div");
+    field.className = "details-field";
+
+    const labelEl = document.createElement("strong");
+    labelEl.textContent = `${label}:`;
+    field.appendChild(labelEl);
+    field.appendChild(document.createTextNode(" "));
+
+    if (options.richText) {
+        const richTextWrap = document.createElement("span");
+        if (!appendSanitizedRichText(richTextWrap, value)) {
+            richTextWrap.textContent = "";
+        }
+        field.appendChild(richTextWrap);
+        detailsDiv.appendChild(field);
+        return;
+    }
+
+    if (options.link) {
+        const href = getSafeHref(value, true);
+        if (href) {
+            const link = document.createElement("a");
+            link.href = href;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = normalizeString(value);
+            field.appendChild(link);
+        } else {
+            field.appendChild(document.createTextNode(normalizeString(value)));
+        }
+        detailsDiv.appendChild(field);
+        return;
+    }
+
+    field.appendChild(document.createTextNode(normalizeString(value)));
+    detailsDiv.appendChild(field);
+}
+
+function getResourceSelectionKey(resource) {
+    return [
+        normalizeString(resource.Organization),
+        normalizeString(resource.Address),
+        normalizeString(resource.Phone),
+        normalizeString(resource.Website)
+    ].join("|");
 }
 
 function sortByOrganizationInPlace(list) {
     list.sort((a, b) => {
-        const nameA = (a.Organization || "").toLowerCase();
-        const nameB = (b.Organization || "").toLowerCase();
+        const nameA = normalizeString(a.Organization).toLowerCase();
+        const nameB = normalizeString(b.Organization).toLowerCase();
         if (nameA < nameB) return -1;
         if (nameA > nameB) return 1;
         return 0;
@@ -120,90 +311,82 @@ function updateResultCount(count) {
 }
 
 function renderResults(resources) {
-    resultsDiv.innerHTML = '';
-
-    // Reset details panel to instructions (no auto-select)
-    detailsDiv.innerHTML = `
-        <div class="details-empty">
-            Select a resource<br>
-            <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
-        </div>
-    `;
-
+    clearElement(resultsDiv);
+    renderDetailsEmptyState();
     selectedResourceId = null;
 
     updateResultCount(resources.length);
 
     if (resources.length === 0) {
-        resultsDiv.innerHTML = '<div class="result-card">No results found.</div>';
+        renderStatusCard(resultsDiv, "No results found.");
         return;
     }
 
     resources.forEach(resource => {
-        const card = document.createElement('div');
-        card.className = 'result-card';
-        card.innerHTML = `
-            <div class="card-title"><strong>${resource.Organization}</strong></div>
-            <div class="card-description">${resource.Description || ""}</div>
-        `;
+        const card = document.createElement("div");
+        card.className = "result-card";
+        card.dataset.resourceKey = getResourceSelectionKey(resource);
+
+        const title = document.createElement("div");
+        title.className = "card-title";
+
+        const strong = document.createElement("strong");
+        strong.textContent = normalizeString(resource.Organization) || "No name";
+        title.appendChild(strong);
+
+        const description = createTextBlock(
+            "div",
+            "card-description",
+            getPlainText(resource.Description)
+        );
+
+        card.appendChild(title);
+        card.appendChild(description);
         card.onclick = () => showDetails(resource);
         resultsDiv.appendChild(card);
     });
 }
 
 function showDetails(resource) {
-    // Highlight selected card
-    const cards = document.querySelectorAll('.result-card');
+    const cards = document.querySelectorAll(".result-card");
+    const resourceKey = getResourceSelectionKey(resource);
+
     cards.forEach(card => {
         card.style.background = "#f7f9ff";
         card.style.borderLeft = "none";
 
-        const title = card.querySelector('.card-title').innerText;
-        if (title === resource.Organization) {
+        if (card.dataset.resourceKey === resourceKey) {
             card.style.background = "#eef2ff";
             card.style.borderLeft = "4px solid #6a7cff";
         }
     });
 
-    const website = resource.Website ? String(resource.Website).trim() : "";
-    const websiteHref = website
-        ? (website.startsWith("http") ? website : "https://" + website)
-        : "";
+    selectedResourceId = resourceKey;
 
-    const formattedSubcategories = String(resource.Subcategories || "")
-        .split(",")
-        .map(v => v.trim())
-        .filter(v => v.length > 0)
-        .map(formatSubcategoryLabel)
-        .join(", ");
+    clearElement(detailsDiv);
+    detailsDiv.appendChild(
+        createTextBlock("div", "details-title", normalizeString(resource.Organization) || "No name")
+    );
 
-    detailsDiv.innerHTML = `
-        <div class="details-title">${resource.Organization || "No name"}</div>
-        <div class="details-field"><strong>Description:</strong> ${resource.Description || ""}</div>
-        
-        <div class="details-field"><strong>Address:</strong> ${resource.Address || ""}</div>
-        <div class="details-field"><strong>City:</strong> ${resource.City || ""}</div>
-        <div class="details-field"><strong>Zip:</strong> ${resource.Zip || ""}</div>
-        <div class="details-field"><strong>Phone:</strong> ${resource.Phone || ""}</div>
-        <div class="details-field"><strong>Email:</strong> ${resource.Email || ""}</div>
-
-        <div class="details-field"><strong>Website:</strong> ${
-            websiteHref ? `<a href="${websiteHref}" target="_blank" rel="noopener noreferrer">${website}</a>` : ""
-        }</div>
-
-        <div class="details-field"><strong>Categories:</strong> ${resource.Categories || ""}</div>
-        <div class="details-field"><strong>Subcategories:</strong> ${formattedSubcategories || ""}</div>
-
-        <div class="details-field"><strong>Eligibility:</strong> ${resource.Eligibility || ""}</div>
-        <div class="details-field"><strong>Hours:</strong> ${resource.Hours || ""}</div>
-        <div class="details-field"><strong>Cost:</strong> ${resource.Cost || ""}</div>
-        <div class="details-field"><strong>Last Verified:</strong> ${resource["Last Verified"] || ""}</div>
-        <div class="details-field"><strong>Notes:</strong> ${resource.Notes || ""}</div>
-    `;
+    appendDetailField("Description", resource.Description, { richText: true });
+    appendDetailField("Address", resource.Address);
+    appendDetailField("City", resource.City);
+    appendDetailField("Zip", resource.Zip);
+    appendDetailField("Phone", resource.Phone);
+    appendDetailField("Email", resource.Email);
+    appendDetailField("Website", resource.Website, { link: true });
+    appendDetailField("Categories", formatArrayForDisplay(resource.Categories));
+    appendDetailField("Subcategories", formatArrayForDisplay(resource.Subcategories, formatSubcategoryLabel));
+    appendDetailField("Eligibility", resource.Eligibility);
+    appendDetailField("Hours", resource.Hours);
+    appendDetailField("Cost", resource.Cost);
+    appendDetailField("Last Verified", resource["Last Verified"]);
+    appendDetailField("Notes", resource.Notes, { richText: true });
 }
 
 function showError(message) {
-    resultsDiv.innerHTML = `<div class="result-card">${message}</div>`;
+    renderStatusCard(resultsDiv, message);
+    renderDetailsEmptyState();
     updateResultCount(0);
 }
 
@@ -214,7 +397,7 @@ function populateCategoryFilter() {
     categorySelect.innerHTML = '<option value="all">All categories</option>';
 
     categoryOptions.forEach(option => {
-        const opt = document.createElement('option');
+        const opt = document.createElement("option");
         opt.value = option.value;
         opt.textContent = option.label;
         categorySelect.appendChild(opt);
@@ -224,7 +407,7 @@ function populateCategoryFilter() {
 function populateSubcategoryFilterForCategory(categoryValue) {
     subcategorySelect.innerHTML = '<option value="all">All subcategories</option>';
 
-    if (!categoryValue || categoryValue === 'all') {
+    if (!categoryValue || categoryValue === "all") {
         subcategorySelect.disabled = true;
         return;
     }
@@ -233,7 +416,7 @@ function populateSubcategoryFilterForCategory(categoryValue) {
     if (subs && subs.length > 0) {
         subcategorySelect.disabled = false;
         subs.forEach(option => {
-            const opt = document.createElement('option');
+            const opt = document.createElement("option");
             opt.value = option.value;
             opt.textContent = option.label;
             subcategorySelect.appendChild(opt);
@@ -244,14 +427,14 @@ function populateSubcategoryFilterForCategory(categoryValue) {
 }
 
 function resetSubcategoryFilter() {
-    subcategorySelect.value = 'all';
+    subcategorySelect.value = "all";
     subcategorySelect.innerHTML = '<option value="all">All subcategories</option>';
     subcategorySelect.disabled = true;
 }
 
 function resetAll() {
-    searchInput.value = '';
-    categorySelect.value = 'all';
+    searchInput.value = "";
+    categorySelect.value = "all";
     resetSubcategoryFilter();
     applyFilters();
 }
@@ -260,42 +443,36 @@ function resetAll() {
 // MAIN FILTERING FUNCTION
 // ------------------------------------
 function applyFilters() {
-    const searchTerm = (searchInput.value || "").trim().toLowerCase();
+    const searchTerm = normalizeString(searchInput.value).toLowerCase();
     const categoryFilter = categorySelect.value;
     const subcategoryFilter = subcategorySelect.value;
 
     const filteredData = globalData.filter(resource => {
-        // 1. SEARCH FILTER
+        const categories = normalizeStringArray(resource.Categories);
+        const subcategories = normalizeStringArray(resource.Subcategories);
+
         if (searchTerm) {
             const searchFields = [
-                resource.Organization,
-                resource.Description,
-                resource.Categories,
-                resource.Subcategories,
-                resource.Keywords
-            ].join(' ').toLowerCase();
+                normalizeString(resource.Organization),
+                getPlainText(resource.Description),
+                categories.join(" "),
+                subcategories.join(" "),
+                normalizeString(resource.Keywords)
+            ].join(" ").toLowerCase();
 
             if (!searchFields.includes(searchTerm)) {
                 return false;
             }
         }
 
-        // 2. CATEGORY FILTER
-        if (categoryFilter !== 'all') {
-            const escapedCat = escapeRegExp(categoryFilter);
-            const regex = new RegExp(`(?:^|,)\\s*${escapedCat}\\s*(?:,|$)`, 'i');
-
-            if (!regex.test(resource.Categories || "")) {
+        if (categoryFilter !== "all") {
+            if (!categories.some(category => category.toLowerCase() === categoryFilter)) {
                 return false;
             }
         }
 
-        // 3. SUBCATEGORY FILTER
-        if (subcategoryFilter !== 'all') {
-            const escapedSub = escapeRegExp(subcategoryFilter);
-            const regex = new RegExp(`(?:^|,)\\s*${escapedSub}\\s*(?:,|$)`, 'i');
-
-            if (!regex.test(resource.Subcategories || "")) {
+        if (subcategoryFilter !== "all") {
+            if (!subcategories.some(subcategory => subcategory.toLowerCase() === subcategoryFilter)) {
                 return false;
             }
         }
@@ -303,7 +480,6 @@ function applyFilters() {
         return true;
     });
 
-    // Sort results by Organization before rendering
     sortByOrganizationInPlace(filteredData);
     renderResults(filteredData);
 }
@@ -312,25 +488,14 @@ function applyFilters() {
 // INIT
 // -----------------------------
 async function init() {
-    resultsDiv.innerHTML = '<div class="result-card">Loading…</div>';
+    renderStatusCard(resultsDiv, "Loading...");
+    renderDetailsEmptyState();
     updateResultCount(0);
 
     const [data, rawCats] = await Promise.all([loadData(), loadCategories()]);
     globalData = Array.isArray(data) ? data : [];
 
-    // Parse categories from object: { "Category Name": [subs...] }
-    let categoryLabels = [];
-    let rawSubcategories = {};
-
-    if (rawCats && Array.isArray(rawCats.categories)) {
-        // Old structure (kept for safety)
-        categoryLabels = rawCats.categories;
-        rawSubcategories = rawCats.subcategories || {};
-    } else if (rawCats) {
-        categoryLabels = Object.keys(rawCats);
-        rawSubcategories = rawCats;
-    }
-
+    const categoryLabels = rawCats ? Object.keys(rawCats) : [];
     categoryOptions = [];
     subcategoryOptions = {};
 
@@ -344,12 +509,9 @@ async function init() {
             value: valueLower
         });
 
-        const subs = Array.isArray(rawSubcategories[catLabel])
-            ? rawSubcategories[catLabel]
-            : [];
-
+        const subs = Array.isArray(rawCats[catLabel]) ? rawCats[catLabel] : [];
         subcategoryOptions[valueLower] = subs.map(subLabel => {
-            const raw = String(subLabel || "").trim();
+            const raw = normalizeString(subLabel);
             return {
                 value: raw.toLowerCase(),
                 label: formatSubcategoryLabel(raw)
@@ -376,7 +538,6 @@ subcategorySelect.addEventListener("change", applyFilters);
 
 resetButton.addEventListener("click", resetAll);
 
-// Center brand block and title both act as "home/reset"
 function handleHomeClick() {
     resetAll();
     window.scrollTo({ top: 0, behavior: "smooth" });

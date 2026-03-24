@@ -1,4 +1,4 @@
-// import.js — one-time importer for data.json + categories.json into Firestore
+// import.js - one-time importer for data.json + categories.json into Firestore
 
 import { db } from "./firebase.js";
 import {
@@ -6,7 +6,6 @@ import {
     addDoc
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// Simple logging utility to the page
 const logEl = document.getElementById("log");
 function log(message) {
     const ts = new Date().toISOString();
@@ -14,7 +13,6 @@ function log(message) {
     logEl.scrollTop = logEl.scrollHeight;
 }
 
-// Disable/enable all import buttons while work is in progress
 const btnResources = document.getElementById("import-resources-btn");
 const btnCategories = document.getElementById("import-categories-btn");
 const btnAll = document.getElementById("import-all-btn");
@@ -26,7 +24,15 @@ function setButtonsDisabled(disabled) {
     });
 }
 
-// Generic loader for local JSON files
+function normalizeString(value) {
+    return String(value ?? "").trim();
+}
+
+function normalizeStringArray(value) {
+    if (!Array.isArray(value)) return [];
+    return value.map(item => normalizeString(item)).filter(Boolean);
+}
+
 async function loadJson(path) {
     const resp = await fetch(path);
     if (!resp.ok) {
@@ -35,85 +41,241 @@ async function loadJson(path) {
     return await resp.json();
 }
 
-// ------------------------------
-// IMPORT RESOURCES (data.json)
-// ------------------------------
-async function importResources() {
-    log("Starting import of resources from data.json ...");
-
-    const data = await loadJson("data.json"); // existing file used by app.js :contentReference[oaicite:3]{index=3}
-
-    if (!Array.isArray(data)) {
-        throw new Error("data.json is not an array. Cannot import.");
-    }
-
-    log(`Found ${data.length} resources in data.json.`);
-
-    const resourcesCol = collection(db, "resources");
-
-    let count = 0;
-    for (const resource of data) {
-        // Expect resource shape to match your current JSON:
-        // { Organization, Description, Address, City, Zip, Phone, Website, Categories, Subcategories, Email, Hours, Eligibility, Cost, Notes, "Last Verified", Keywords, UpdatedBy } :contentReference[oaicite:4]{index=4}
-        await addDoc(resourcesCol, resource);
-        count++;
-        if (count % 20 === 0) {
-            log(`Imported ${count} resources...`);
-        }
-    }
-
-    log(`Finished importing resources. Total imported: ${count}.`);
-}
-
-// ---------------------------------------------
-// IMPORT CATEGORIES (categories.json → docs)
-// ---------------------------------------------
-async function importCategories() {
-    log("Starting import of categories from categories.json ...");
-
-    const rawCats = await loadJson("categories.json"); // used by app.js init() for filters :contentReference[oaicite:5]{index=5}
-
-    // We mirror the structure detection logic from app.js:
-    //  - Structure A: { categories: [...], subcategories: { "Category": ["Sub1", ...], ... } }
-    //  - Structure B: { "Category Name": ["Sub1", "Sub2"], ... }
+function parseCategoryDefinitions(rawCats) {
     let categoryLabels = [];
     let rawSubcategories = {};
 
     if (rawCats && Array.isArray(rawCats.categories)) {
-        // Structure A
         categoryLabels = rawCats.categories;
         rawSubcategories = rawCats.subcategories || {};
     } else if (rawCats && typeof rawCats === "object") {
-        // Structure B
         categoryLabels = Object.keys(rawCats);
         rawSubcategories = rawCats;
     } else {
         throw new Error("categories.json is in an unexpected format.");
     }
 
-    log(`Detected ${categoryLabels.length} category labels.`);
+    const categories = categoryLabels
+        .map(label => normalizeString(label))
+        .filter(Boolean);
+
+    const subcategoriesByCategory = {};
+    categories.forEach(catLabel => {
+        subcategoriesByCategory[catLabel] = normalizeStringArray(rawSubcategories[catLabel]);
+    });
+
+    const allSubcategories = Array.from(new Set(
+        Object.values(subcategoriesByCategory).flatMap(list => list)
+    ));
+
+    return {
+        categories,
+        subcategoriesByCategory,
+        allSubcategories
+    };
+}
+
+const LEGACY_CATEGORY_ALIASES = {
+    "Children, Youth & Family Services": "Children, Youth & Family Services",
+    "Employment, Education & Financial Assistance": "Employment, Education & Financial Assistance",
+    "Employment Education & Job Training": "Employment, Education & Financial Assistance",
+    "Employment, Education & Job Training": "Employment, Education & Financial Assistance",
+    "Employment, Education, & Job Training": "Employment, Education & Financial Assistance",
+    "Financial Assistance & Benefits": "Employment, Education & Financial Assistance",
+    "Food, Clothing, & Basic Needs": "Food & Basic Needs",
+    "Food Clothing & Basic Needs": "Food & Basic Needs",
+    "Health Care & Wellness": "Health & Medical",
+    "Healthcare & Wellness": "Health & Medical",
+    "Mental Health, Addiction & Substance Use": "Mental Health & Substance Use",
+    "Mental Health, Addiction, & Substance Use": "Mental Health & Substance Use",
+    "Mental Health Addiction & Substance Use": "Mental Health & Substance Use",
+    "Seniors & Disability Support": "Seniors & Disability Services"
+};
+
+function applyLegacyCategoryAliases(values) {
+    const deduped = new Map();
+
+    normalizeStringArray(values).forEach(value => {
+        const canonical = LEGACY_CATEGORY_ALIASES[value] || value;
+        deduped.set(canonical.toLowerCase(), canonical);
+    });
+
+    return Array.from(deduped.values());
+}
+
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildCategoryCandidates(options) {
+    const candidates = new Map();
+
+    normalizeStringArray(options).forEach(option => {
+        candidates.set(option.toLowerCase(), { label: option, canonical: option });
+    });
+
+    Object.entries(LEGACY_CATEGORY_ALIASES).forEach(([label, canonical]) => {
+        const normalizedLabel = normalizeString(label);
+        const normalizedCanonical = normalizeString(canonical);
+        if (!normalizedLabel || !normalizedCanonical) return;
+
+        candidates.set(normalizedLabel.toLowerCase(), {
+            label: normalizedLabel,
+            canonical: normalizedCanonical
+        });
+    });
+
+    return Array.from(candidates.values()).sort((a, b) => b.label.length - a.label.length);
+}
+
+function parseKnownValues(storedValue, options) {
+    if (Array.isArray(storedValue)) {
+        return {
+            matches: normalizeStringArray(storedValue),
+            leftovers: ""
+        };
+    }
+
+    const raw = normalizeString(storedValue);
+    if (!raw) {
+        return { matches: [], leftovers: "" };
+    }
+
+    let working = raw.toLowerCase();
+    const matches = [];
+    const used = new Set();
+
+    const sortedOptions = (options || [])
+        .map(option => normalizeString(option))
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+
+    sortedOptions.forEach(option => {
+        const optionLower = option.toLowerCase();
+        if (used.has(optionLower)) return;
+
+        if (working.includes(optionLower)) {
+            matches.push(option);
+            used.add(optionLower);
+            working = working.replace(optionLower, " ");
+        }
+    });
+
+    const leftovers = working.replace(/[\s,;|/.-]+/g, "");
+    return { matches, leftovers };
+}
+
+function convertResourceTaxonomy(resource, definitions) {
+    const normalizedCategoryOptions = new Map(
+        definitions.categories.map(category => [category.toLowerCase(), category])
+    );
+    const categoryCandidates = buildCategoryCandidates(definitions.categories);
+    const matchedCategoryMap = new Map();
+    let categoryWorking = normalizeString(resource.Categories);
+    const unmatchedCategories = [];
+
+    if (Array.isArray(resource.Categories)) {
+        applyLegacyCategoryAliases(resource.Categories).forEach(category => {
+            const canonical = normalizedCategoryOptions.get(category.toLowerCase());
+            if (canonical) {
+                matchedCategoryMap.set(canonical.toLowerCase(), canonical);
+            } else {
+                unmatchedCategories.push(category);
+            }
+        });
+    } else if (categoryWorking) {
+        categoryCandidates.forEach(({ label, canonical }) => {
+            const canonicalLabel = normalizedCategoryOptions.get(canonical.toLowerCase());
+            if (!canonicalLabel) return;
+
+            const matcher = new RegExp(escapeRegExp(label), "ig");
+            if (matcher.test(categoryWorking)) {
+                matchedCategoryMap.set(canonicalLabel.toLowerCase(), canonicalLabel);
+                categoryWorking = categoryWorking.replace(matcher, " ");
+            }
+        });
+
+        unmatchedCategories.push(
+            ...categoryWorking
+                .split(",")
+                .map(part => normalizeString(part))
+                .filter(Boolean)
+        );
+    }
+
+    const subcategoryResult = parseKnownValues(resource.Subcategories, definitions.allSubcategories);
+
+    return {
+        resource: {
+            ...resource,
+            Categories: Array.from(matchedCategoryMap.values()),
+            Subcategories: subcategoryResult.matches
+        },
+        warnings: {
+            categoryLeftovers: unmatchedCategories.join(" | "),
+            subcategoryLeftovers: subcategoryResult.leftovers
+        }
+    };
+}
+
+async function importResources() {
+    log("Starting import of resources from data.json ...");
+
+    const [data, rawCats] = await Promise.all([
+        loadJson("data.json"),
+        loadJson("categories.json")
+    ]);
+
+    if (!Array.isArray(data)) {
+        throw new Error("data.json is not an array. Cannot import.");
+    }
+
+    const definitions = parseCategoryDefinitions(rawCats);
+    log(`Found ${data.length} resources in data.json.`);
+
+    const resourcesCol = collection(db, "resources");
+
+    let count = 0;
+    let warned = 0;
+
+    for (const resource of data) {
+        const converted = convertResourceTaxonomy(resource, definitions);
+        await addDoc(resourcesCol, converted.resource);
+        count++;
+
+        if (converted.warnings.categoryLeftovers || converted.warnings.subcategoryLeftovers) {
+            warned++;
+        }
+
+        if (count % 20 === 0) {
+            log(`Imported ${count} resources...`);
+        }
+    }
+
+    if (warned > 0) {
+        log(`Imported with ${warned} taxonomy warning(s). Review source data if needed.`);
+    }
+
+    log(`Finished importing resources. Total imported: ${count}.`);
+}
+
+async function importCategories() {
+    log("Starting import of categories from categories.json ...");
+
+    const rawCats = await loadJson("categories.json");
+    const definitions = parseCategoryDefinitions(rawCats);
+
+    log(`Detected ${definitions.categories.length} category labels.`);
 
     const categoriesCol = collection(db, "categories");
     let count = 0;
 
-    for (const catLabel of categoryLabels) {
-        if (!catLabel || typeof catLabel !== "string") continue;
-
-        const labelTrimmed = catLabel.trim();
-        const subsRaw = Array.isArray(rawSubcategories[catLabel])
-            ? rawSubcategories[catLabel]
-            : [];
-
-        const subcategories = subsRaw
-            .map(s => String(s || "").trim())
-            .filter(s => s.length > 0);
-
+    for (const catLabel of definitions.categories) {
         const docData = {
-            name: labelTrimmed,
-            subcategories
+            name: catLabel,
+            subcategories: definitions.subcategoriesByCategory[catLabel] || []
         };
 
-        // admin.js expects documents of the shape { name, subcategories: [...] } :contentReference[oaicite:6]{index=6}
         await addDoc(categoriesCol, docData);
         count++;
 
@@ -125,9 +287,6 @@ async function importCategories() {
     log(`Finished importing categories. Total imported: ${count}.`);
 }
 
-// ------------------------------
-// BUTTON WIRING
-// ------------------------------
 btnResources.addEventListener("click", async () => {
     try {
         setButtonsDisabled(true);

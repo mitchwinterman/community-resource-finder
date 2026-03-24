@@ -1,6 +1,5 @@
 // ------------------------------------------------------
-// admin.js — Admin dashboard (Firebase Auth + Firestore)
-// SRM: full-file replacement
+// admin.js - Admin dashboard (Firebase Auth + Firestore)
 // ------------------------------------------------------
 
 import { db, auth } from "./firebase.js";
@@ -21,12 +20,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 // ------------------------------------------------------
-// CONFIG (matches your Firestore rules)
+// CONFIG
 // ------------------------------------------------------
 const ADMIN_EMAIL = "mwinterman@washoecounty.gov";
 
 // ------------------------------------------------------
-// DOM (must match admin.html)
+// DOM
 // ------------------------------------------------------
 const loginScreen = document.getElementById("login-screen");
 const adminScreen = document.getElementById("admin-screen");
@@ -70,12 +69,17 @@ const cancelCategoryBtn = document.getElementById("cancel-category-btn");
 // ------------------------------------------------------
 let editingResourceId = null;
 let editingCategoryId = null;
-
-/**
- * categoryMeta: [{ id, name, subcategories: string[] }]
- * /categories docs: { name: string, subcategories: string[] }
- */
 let categoryMeta = [];
+
+const quillEditors = new Map();
+const quillToolbarOptions = [
+  ["bold", "italic", "underline"],
+  [{ list: "ordered" }, { list: "bullet" }],
+  ["link", "clean"]
+];
+const quillFormats = ["bold", "italic", "underline", "list", "link"];
+const richTextAllowedTags = ["a", "br", "em", "li", "ol", "p", "strong", "u", "ul"];
+const richTextAllowedAttrs = ["href"];
 
 // ------------------------------------------------------
 // Helpers
@@ -83,16 +87,25 @@ let categoryMeta = [];
 function show(el) {
   el?.classList.remove("hidden");
 }
+
 function hide(el) {
   el?.classList.add("hidden");
 }
+
 function clearChildren(el) {
   if (!el) return;
   while (el.firstChild) el.removeChild(el.firstChild);
 }
+
 function normalizeString(v) {
   return String(v ?? "").trim();
 }
+
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => normalizeString(item)).filter(Boolean);
+}
+
 function createEl(tag, opts = {}) {
   const el = document.createElement(tag);
   if (opts.className) el.className = opts.className;
@@ -103,57 +116,99 @@ function createEl(tag, opts = {}) {
   return el;
 }
 
+function getQuillCtor() {
+  if (typeof window.Quill !== "function") {
+    throw new Error("Quill failed to load.");
+  }
+  return window.Quill;
+}
+
+function getDOMPurify() {
+  if (!window.DOMPurify) {
+    throw new Error("DOMPurify failed to load.");
+  }
+  return window.DOMPurify;
+}
+
+function sanitizeRichTextHtml(html) {
+  const DOMPurify = getDOMPurify();
+  const clean = DOMPurify.sanitize(String(html ?? ""), {
+    ALLOWED_TAGS: richTextAllowedTags,
+    ALLOWED_ATTR: richTextAllowedAttrs
+  });
+
+  const template = document.createElement("template");
+  template.innerHTML = clean;
+  if (!normalizeString(template.content.textContent || "")) {
+    return "";
+  }
+
+  return clean;
+}
+
+function normalizeStoredDelta(deltaValue) {
+  let parsed = deltaValue;
+  if (!parsed) return null;
+
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.ops)) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function loadQuillContents(quill, htmlValue, deltaValue) {
+  const delta = normalizeStoredDelta(deltaValue);
+  if (delta) {
+    quill.setContents(delta, "api");
+    quill.history.clear();
+    return;
+  }
+
+  const cleanHtml = sanitizeRichTextHtml(htmlValue);
+  if (cleanHtml) {
+    quill.clipboard.dangerouslyPasteHTML(cleanHtml, "api");
+  } else {
+    quill.setText("", "api");
+  }
+
+  quill.history.clear();
+}
+
+function exportQuillContents(quill) {
+  if (normalizeString(quill.getText()) === "") {
+    return { html: "", delta: null };
+  }
+
+  const delta = JSON.parse(JSON.stringify(quill.getContents()));
+  const rawHtml = typeof quill.getSemanticHTML === "function"
+    ? quill.getSemanticHTML()
+    : quill.root.innerHTML;
+
+  return {
+    html: sanitizeRichTextHtml(rawHtml),
+    delta
+  };
+}
+
 function isAdminUser(user) {
   const email = normalizeString(user?.email).toLowerCase();
   return email === ADMIN_EMAIL.toLowerCase();
 }
 
-// Date helpers (SRM: store in Firestore as YYYY-MM-DD string)
 function toDateInputValue(v) {
   const s = normalizeString(v);
   if (!s) return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   return "";
-}
-
-/**
- * SRM-critical fix:
- * Categories/Subcategories are stored as STRING fields, but category names can contain commas.
- * So we CANNOT parse by split(",").
- *
- * Instead: match known option strings against the stored field value.
- * This is safe given your schema: options come from Firestore categories docs.
- */
-function parseSelectionsByMatching(storedValue, options) {
-  const raw = normalizeString(storedValue);
-  if (!raw) return [];
-
-  const hay = raw.toLowerCase();
-  const opts = (options || [])
-    .map(x => normalizeString(x))
-    .filter(Boolean)
-    .sort((a, b) => b.length - a.length); // longest first
-
-  const found = [];
-  const used = new Set();
-
-  for (const opt of opts) {
-    const key = opt.toLowerCase();
-    if (used.has(key)) continue;
-
-    if (hay.includes(key)) {
-      found.push(opt);
-      used.add(key);
-    }
-  }
-
-  return found;
-}
-
-function joinAsDisplayString(arr) {
-  // Keep existing Firestore format: comma+space.
-  // We do NOT change storage format because main site may rely on this.
-  return (arr || []).map(x => normalizeString(x)).filter(Boolean).join(", ");
 }
 
 // ------------------------------------------------------
@@ -196,7 +251,7 @@ onAuthStateChanged(auth, async (user) => {
   if (!isAdminUser(user)) {
     show(loginScreen);
     hide(adminScreen);
-    loginError.textContent = `Signed in as ${user.email || "(no email)"} — not authorized.`;
+    loginError.textContent = `Signed in as ${user.email || "(no email)"} - not authorized.`;
     await signOut(auth);
     return;
   }
@@ -246,7 +301,7 @@ async function loadResources() {
   hide(resourceEditor);
   editingResourceId = null;
 
-  resourceList.textContent = "Loading…";
+  resourceList.textContent = "Loading...";
 
   try {
     const snap = await getDocs(collection(db, "resources"));
@@ -303,7 +358,10 @@ cancelResourceBtn?.addEventListener("click", () => {
 // Resource Form Fields
 // ------------------------------------------------------
 function buildFieldText(fieldKey, label, value = "", required = false) {
-  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "text" } });
+  const wrap = createEl("div", {
+    className: "field-group",
+    attrs: { "data-field": fieldKey, "data-type": "text" }
+  });
   const lbl = createEl("label", { className: "field-label", text: label });
   const input = createEl("input", { attrs: { type: "text" } });
 
@@ -316,7 +374,10 @@ function buildFieldText(fieldKey, label, value = "", required = false) {
 }
 
 function buildFieldDate(fieldKey, label, value = "") {
-  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "date" } });
+  const wrap = createEl("div", {
+    className: "field-group",
+    attrs: { "data-field": fieldKey, "data-type": "date" }
+  });
   const lbl = createEl("label", { className: "field-label", text: label });
   const input = createEl("input", { attrs: { type: "date" } });
 
@@ -327,61 +388,39 @@ function buildFieldDate(fieldKey, label, value = "") {
   return wrap;
 }
 
-function buildFieldRichText(fieldKey, label, htmlValue = "") {
-  const wrap = createEl("div", { className: "field-group", attrs: { "data-field": fieldKey, "data-type": "richtext" } });
+function buildFieldRichText(fieldKey, label, htmlValue = "", deltaValue = null) {
+  const wrap = createEl("div", {
+    className: "field-group quill-field",
+    attrs: { "data-field": fieldKey, "data-type": "richtext" }
+  });
   const lbl = createEl("label", { className: "field-label", text: label });
-
-  const toolbar = createEl("div", { className: "rte-toolbar" });
-  const editor = createEl("div", { className: "rte-editor", attrs: { contenteditable: "true" } });
-
-  editor.innerHTML = normalizeString(htmlValue) || "";
-
-  function cmd(command) {
-    editor.focus();
-    document.execCommand(command, false, null);
-  }
-
-  const btnBold = createEl("button", { className: "rte-btn", text: "B", attrs: { type: "button", title: "Bold" } });
-  btnBold.addEventListener("click", () => cmd("bold"));
-
-  const btnItalic = createEl("button", { className: "rte-btn", text: "I", attrs: { type: "button", title: "Italic" } });
-  btnItalic.addEventListener("click", () => cmd("italic"));
-
-  const btnUnderline = createEl("button", { className: "rte-btn", text: "U", attrs: { type: "button", title: "Underline" } });
-  btnUnderline.addEventListener("click", () => cmd("underline"));
-
-  const btnBullets = createEl("button", { className: "rte-btn", text: "•", attrs: { type: "button", title: "Bulleted List" } });
-  btnBullets.addEventListener("click", () => cmd("insertUnorderedList"));
-
-  const btnNumbers = createEl("button", { className: "rte-btn", text: "1.", attrs: { type: "button", title: "Numbered List" } });
-  btnNumbers.addEventListener("click", () => cmd("insertOrderedList"));
-
-  toolbar.appendChild(btnBold);
-  toolbar.appendChild(btnItalic);
-  toolbar.appendChild(btnUnderline);
-  toolbar.appendChild(btnBullets);
-  toolbar.appendChild(btnNumbers);
+  const editorHost = createEl("div", { className: "quill-editor-host" });
 
   wrap.appendChild(lbl);
-  wrap.appendChild(toolbar);
-  wrap.appendChild(editor);
+  wrap.appendChild(editorHost);
+
+  const Quill = getQuillCtor();
+  const quill = new Quill(editorHost, {
+    theme: "snow",
+    placeholder: `Enter ${label.toLowerCase()}...`,
+    modules: {
+      toolbar: quillToolbarOptions,
+      history: {
+        delay: 1000,
+        maxStack: 100,
+        userOnly: true
+      }
+    },
+    formats: quillFormats
+  });
+
+  loadQuillContents(quill, htmlValue, deltaValue);
+  quillEditors.set(fieldKey, quill);
+
   return wrap;
 }
 
-/**
- * SRM requirement + refinement:
- * - Categories = checkboxes (ONLY categories)
- * - Subcategories appear directly under their category
- * - Multi-select for both
- * - NEW: expand/collapse subcategories WITHOUT selecting the category
- *
- * Storage in Firestore remains string fields:
- *   Categories: "A, B"
- *   Subcategories: "X, Y"
- *
- * Critical fix: we do NOT split by comma because category names include commas.
- */
-function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr) {
+function buildNestedCategorySelector(selectedCategories, selectedSubcategories) {
   const wrapper = createEl("div", {
     className: "field-group",
     attrs: {
@@ -395,16 +434,8 @@ function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr
 
   const container = createEl("div", { className: "cat-nested" });
 
-  const allCategoryNames = categoryMeta.map(c => c.name).filter(Boolean);
-  const allSubNames = Array.from(
-    new Set(categoryMeta.flatMap(c => (c.subcategories || []).map(s => normalizeString(s)).filter(Boolean)))
-  );
-
-  const selectedCats = parseSelectionsByMatching(storedCategoriesStr, allCategoryNames);
-  const selectedSubs = parseSelectionsByMatching(storedSubcategoriesStr, allSubNames);
-
-  const selectedCatSet = new Set(selectedCats.map(x => x.toLowerCase()));
-  const selectedSubSet = new Set(selectedSubs.map(x => x.toLowerCase()));
+  const selectedCatSet = new Set(normalizeStringArray(selectedCategories).map(x => x.toLowerCase()));
+  const selectedSubSet = new Set(normalizeStringArray(selectedSubcategories).map(x => x.toLowerCase()));
 
   const cats = [...categoryMeta].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   cats.forEach(cat => {
@@ -412,8 +443,6 @@ function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr
     if (!catName) return;
 
     const block = createEl("div", { className: "cat-block" });
-
-    // Header = checkbox label + expand/collapse button (button is NOT inside label)
     const header = createEl("div", { className: "cat-header" });
 
     const catLabel = createEl("label", { className: "cat-row" });
@@ -434,13 +463,8 @@ function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr
     header.appendChild(toggleBtn);
     block.appendChild(header);
 
-    // Subcategories wrapper
     const subsWrap = createEl("div", { className: "cat-subs" });
-
-    const subs = (cat.subcategories || [])
-      .map(s => normalizeString(s))
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
+    const subs = normalizeStringArray(cat.subcategories).sort((a, b) => a.localeCompare(b));
 
     if (subs.length) {
       const subList = createEl("div", { className: "cat-sub-list" });
@@ -449,10 +473,7 @@ function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr
         const subRow = createEl("label", { className: "cat-sub-row" });
         const subCb = createEl("input", { attrs: { type: "checkbox" } });
         subCb.value = sub;
-
-        // Keep checked if stored and category is selected
         subCb.checked = catCb.checked && selectedSubSet.has(sub.toLowerCase());
-        // Disabled unless category is selected
         subCb.disabled = !catCb.checked;
 
         subRow.appendChild(subCb);
@@ -465,9 +486,6 @@ function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr
       subsWrap.appendChild(createEl("div", { className: "cat-sub-empty", text: "(No subcategories)" }));
     }
 
-    // Expand/collapse state:
-    // - independent of checkbox
-    // - but if checkbox is checked, we force visible (so user can select subs)
     let expanded = false;
 
     function syncSubsUI() {
@@ -476,13 +494,11 @@ function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr
 
       subsWrap.style.display = shouldShow ? "block" : "none";
 
-      // Enable sub-checkboxes only when category checked
       subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
         cb.disabled = !catCb.checked;
-        if (!catCb.checked) cb.checked = false; // SRM: no subcategories without the parent category
+        if (!catCb.checked) cb.checked = false;
       });
 
-      // Toggle button label reflects expanded state (not the checkbox state)
       toggleBtn.textContent = expanded ? "Hide" : "Show";
       toggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
     }
@@ -493,17 +509,11 @@ function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr
     });
 
     catCb.addEventListener("change", () => {
-      // If user checks category, show the section (force visible)
-      // If user unchecks, we do not automatically collapse; we keep expanded state.
       syncSubsUI();
     });
 
     block.appendChild(subsWrap);
     container.appendChild(block);
-
-    // Initial render:
-    // If category is already selected, show subs.
-    expanded = false;
     syncSubsUI();
   });
 
@@ -512,36 +522,42 @@ function buildNestedCategorySelector(storedCategoriesStr, storedSubcategoriesStr
 }
 
 // ------------------------------------------------------
-// Build resource editor form (SRM schema + SRM order)
+// Build resource editor form
 // ------------------------------------------------------
 function buildResourceForm(data) {
+  quillEditors.clear();
   clearChildren(resourceForm);
 
   resourceForm.appendChild(buildFieldText("Organization", "Organization", data.Organization || "", true));
-  resourceForm.appendChild(buildFieldRichText("Description", "Description", data.Description || ""));
+  resourceForm.appendChild(buildFieldRichText(
+    "Description",
+    "Description",
+    data.Description || "",
+    data.DescriptionDelta || null
+  ));
 
-  // IMPORTANT: pass raw stored strings, do NOT parse by comma
-  resourceForm.appendChild(buildNestedCategorySelector(data.Categories || "", data.Subcategories || ""));
+  resourceForm.appendChild(buildNestedCategorySelector(data.Categories, data.Subcategories));
 
   resourceForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
-
   resourceForm.appendChild(buildFieldText("Website", "Website", data.Website || "", false));
   resourceForm.appendChild(buildFieldText("Phone", "Phone", data.Phone || "", false));
   resourceForm.appendChild(buildFieldText("Email", "Email", data.Email || "", false));
-
   resourceForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
   resourceForm.appendChild(buildFieldText("City", "City", data.City || "", false));
   resourceForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
-
   resourceForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
   resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
   resourceForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
   resourceForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
-
   resourceForm.appendChild(buildFieldDate("Last Verified", "Last Verified", data["Last Verified"] || ""));
   resourceForm.appendChild(buildFieldText("UpdatedBy", "Updated By", data.UpdatedBy || "", false));
 
-  resourceForm.appendChild(buildFieldRichText("Notes", "Notes", data.Notes || ""));
+  resourceForm.appendChild(buildFieldRichText(
+    "Notes",
+    "Notes",
+    data.Notes || "",
+    data.NotesDelta || null
+  ));
 
   resourceForm.appendChild(buildFieldText("Title", "Title", data.Title || "", false));
   resourceForm.appendChild(buildFieldText("OrganizationName", "OrganizationName", data.OrganizationName || "", false));
@@ -572,14 +588,16 @@ function collectResourcePayload() {
         }
       });
 
-      payload["Categories"] = joinAsDisplayString(selectedCats);
-      payload["Subcategories"] = joinAsDisplayString(selectedSubs);
+      payload.Categories = selectedCats;
+      payload.Subcategories = selectedSubs;
       continue;
     }
 
     if (type === "richtext") {
-      const editor = g.querySelector(".rte-editor");
-      payload[field] = editor ? editor.innerHTML : "";
+      const quill = quillEditors.get(field);
+      const { html, delta } = quill ? exportQuillContents(quill) : { html: "", delta: null };
+      payload[field] = html;
+      payload[`${field}Delta`] = delta;
       continue;
     }
 
@@ -631,7 +649,7 @@ deleteResourceBtn?.addEventListener("click", async () => {
 // CATEGORIES (CRUD)
 // ------------------------------------------------------
 async function loadCategories() {
-  categoryList.textContent = "Loading…";
+  categoryList.textContent = "Loading...";
   categoryMeta = [];
 
   try {
@@ -642,7 +660,7 @@ async function loadCategories() {
       cats.push({
         id: ds.id,
         name: normalizeString(d.name),
-        subcategories: Array.isArray(d.subcategories) ? d.subcategories : [],
+        subcategories: normalizeStringArray(d.subcategories),
       });
     });
 
