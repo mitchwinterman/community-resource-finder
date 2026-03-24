@@ -2,7 +2,7 @@
 
 Community Resource Finder is a Firebase-backed directory for browsing community services, filtering them by category and subcategory, and maintaining the directory through a browser-based admin panel.
 
-This repository currently contains the public site, the admin interface, the one-time Firestore import tool, the Firebase client configuration, and the legacy JSON source files that were used to seed the Firestore database.
+This repository currently contains the public site, the admin interface, the Firebase client configuration, and legacy JSON source files from the original Firestore seed process.
 
 ## What This Project Does
 
@@ -12,7 +12,6 @@ The app is designed to help patrons and staff find local organizations and progr
 - filtering the directory by category and subcategory
 - viewing resource details in a master-detail layout
 - maintaining resources and categories through an authenticated admin page
-- importing existing JSON records into Firestore
 
 The project is implemented as a small static frontend application. There is no build step, no framework, and no server-side application code in this repo.
 
@@ -37,13 +36,9 @@ Top-level files:
 - `admin.html`: admin login and editing interface
 - `admin.js`: admin authentication and CRUD operations for resources and categories
 - `admin.css`: admin styling
-- `import.html`: one-time import page
-- `import.js`: one-time Firestore importer for `data.json` and `categories.json`
-- `migrate-taxonomy.html`: one-time schema migration page for converting legacy resource taxonomy strings to arrays
-- `migrate-taxonomy.js`: migration logic for rewriting existing Firestore resource docs
 - `firebase.js`: Firebase app, Firestore, and Auth initialization
-- `data.json`: legacy resource data source used for initial import
-- `categories.json`: legacy category/subcategory data source used for initial import
+- `data.json`: legacy resource data snapshot retained for reference
+- `categories.json`: legacy category/subcategory snapshot retained for reference
 - `crf-logo.png`: Community Resource Finder logo
 - `wcls-logo.png`: Washoe County Library System logo
 
@@ -76,19 +71,6 @@ It:
    - resources
    - categories
    - subcategories inside category documents
-
-### Import Tool
-
-The import tool lives in `import.html` + `import.js`.
-
-It:
-
-- reads `data.json`
-- reads `categories.json`
-- writes those records into Firestore
-- is intended for one-time use only
-
-Important: the import tool uses `addDoc()`, so rerunning imports will create duplicate records unless the target collections are cleared first.
 
 ## Firebase Configuration
 
@@ -167,7 +149,6 @@ Notes:
 
 - The public site reads category names from these documents.
 - The admin site uses these documents to build its nested category/subcategory selector.
-- The import tool can also derive these records from `categories.json`.
 
 ## Login Details
 
@@ -230,7 +211,6 @@ Even though this is a static site, you should serve it through a local web serve
 Reasons:
 
 - ES modules are loaded via `<script type="module">`
-- `import.js` fetches local JSON files
 - browsers often block or behave inconsistently with module imports and fetches under `file://`
 
 ### Quick Start with Python
@@ -258,8 +238,6 @@ After starting a local server, these pages should be available:
 - `/help.html`
 - `/contact.html`
 - `/admin.html`
-- `/import.html`
-- `/migrate-taxonomy.html`
 
 ## Public Site Behavior
 
@@ -404,69 +382,6 @@ The Categories panel allows staff to:
 - save changes
 - delete categories
 
-## Import Workflow
-
-The import tool exists to seed Firestore from the JSON files in this repo.
-
-### What It Imports
-
-- `data.json` -> `resources` collection
-- `categories.json` -> `categories` collection
-
-### How to Run the Import
-
-1. Make sure Firebase is pointed at the correct project.
-2. Start a local web server.
-3. Open `import.html`.
-4. Click one of:
-   - `Import Resources`
-   - `Import Categories`
-   - `Import BOTH (Resources + Categories)`
-5. Watch the on-page log for progress and errors.
-
-### Import Safety Notes
-
-- The importer does not deduplicate records.
-- The importer does not upsert by ID.
-- The importer does not delete old records first.
-- Running an import multiple times will create duplicates.
-- `import.html` and `import.js` should not remain publicly exposed on production hosting after the data is loaded.
-- Resource imports convert legacy category/subcategory strings into arrays using the category definitions in `categories.json`.
-
-## Schema Migration
-
-The repository now expects `resources.Categories` and `resources.Subcategories` to be Firestore arrays.
-
-If your existing Firestore data still uses legacy comma-delimited strings, run the one-time migration page before deploying the hard-cutover app/admin changes.
-
-### Migration Page
-
-Use:
-
-- `migrate-taxonomy.html`
-
-Examples:
-
-- local dev: `http://localhost:8000/migrate-taxonomy.html`
-- hosted temporary page: `https://<your-site>/migrate-taxonomy.html`
-
-### Migration Steps
-
-1. Start a local web server for this repo.
-2. Open `migrate-taxonomy.html`.
-3. Sign in with the admin Firebase account.
-4. Click `Preview Migration`.
-5. Review any warnings in the on-page log.
-6. Click `Run Migration`.
-7. Deploy the updated app/admin code only after the migration succeeds.
-
-### Migration Notes
-
-- The migration rewrites existing resource docs in Firestore.
-- It converts `Categories` and `Subcategories` from strings to arrays.
-- Docs with unmatched leftover taxonomy text are skipped and logged for manual review.
-- `migrate-taxonomy.html` and `migrate-taxonomy.js` should not remain publicly exposed after use.
-
 ## Deployment
 
 This repo is structured like a static site deployment.
@@ -493,10 +408,9 @@ Before pushing to production, verify:
 4. the admin user exists in Firebase Auth
 5. the admin password is known and stored in an approved password manager
 6. `resources` and `categories` collections exist and contain expected data
-7. `import.html` and `import.js` are removed from production hosting if no longer needed
-8. contact email targets are still correct
-9. branding assets and footer text are current
-10. the site works on mobile and desktop browsers
+7. contact email targets are still correct
+8. branding assets and footer text are current
+9. the site works on mobile and desktop browsers
 
 ## Firestore and Auth Setup Checklist
 
@@ -601,9 +515,7 @@ If you are actively maintaining this project, the highest-value follow-up work i
 
 1. add Firestore rules and document them in the repo
 2. replace `mailto:` contact flow with a real submission backend
-3. remove or secure the import page in production
-4. remove or secure the migration page after the cutover
-5. add a data validation and cleanup process for the taxonomy and imported records
+3. add a data validation and cleanup process for the taxonomy and imported records
 
 ## Maintenance Ownership Notes
 
