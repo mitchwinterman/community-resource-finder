@@ -17,6 +17,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
+  getIdTokenResult,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
   canonicalizeSubcategoryInput,
@@ -30,8 +31,6 @@ import {
 // ------------------------------------------------------
 // CONFIG
 // ------------------------------------------------------
-const ADMIN_EMAIL = "mwinterman@washoecounty.gov";
-
 // ------------------------------------------------------
 // DOM
 // ------------------------------------------------------
@@ -207,9 +206,16 @@ function exportQuillContents(quill) {
   };
 }
 
-function isAdminUser(user) {
-  const email = normalizeString(user?.email).toLowerCase();
-  return email === ADMIN_EMAIL.toLowerCase();
+async function userHasAdminClaim(user) {
+  if (!user) return false;
+
+  try {
+    const tokenResult = await getIdTokenResult(user, true);
+    return tokenResult?.claims?.admin === true;
+  } catch (err) {
+    console.error("Error reading admin custom claim:", err);
+    return false;
+  }
 }
 
 function toDateInputValue(v) {
@@ -253,13 +259,15 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) {
     show(loginScreen);
     hide(adminScreen);
+    loginError.textContent = "";
     return;
   }
 
-  if (!isAdminUser(user)) {
+  const isAdmin = await userHasAdminClaim(user);
+  if (!isAdmin) {
     show(loginScreen);
     hide(adminScreen);
-    loginError.textContent = `Signed in as ${user.email || "(no email)"} - not authorized.`;
+    loginError.textContent = `Signed in as ${user.email || "(no email)"} but this account does not have the required admin claim.`;
     await signOut(auth);
     return;
   }

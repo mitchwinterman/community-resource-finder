@@ -2,7 +2,7 @@
 
 Community Resource Finder is a Firebase-backed directory for browsing community services, filtering them by category and subcategory, and maintaining the directory through a browser-based admin panel.
 
-This repository currently contains the public site, the admin interface, the Firebase client configuration, shared normalization rules for taxonomy and contact fields, and legacy JSON source files from the original Firestore seed process.
+This repository currently contains the public site, the admin interface, the Firebase client configuration, shared normalization rules for taxonomy and contact fields, Firestore security rules, a one-time admin-claim setup script, and legacy JSON source files from the original Firestore seed process.
 
 ## What This Project Does
 
@@ -38,6 +38,9 @@ Top-level files:
 - `admin.css`: admin styling
 - `taxonomy-rules.js`: shared taxonomy normalization rules used by the admin category editor
 - `contact-fields.js`: shared website and phone normalization helpers used by the app and admin
+- `firestore.rules`: Cloud Firestore security rules for public reads and admin-only writes
+- `package.json`: Node tooling for one-time Firebase Admin scripts
+- `tools/set_admin_claim.mjs`: one-time script to grant or remove the Firebase `admin` custom claim
 - `firebase.js`: Firebase app, Firestore, and Auth initialization
 - `data.json`: legacy resource data snapshot retained for reference
 - `categories.json`: canonical category/subcategory snapshot retained for reference
@@ -67,7 +70,7 @@ It:
 
 1. Shows a login screen.
 2. Signs users in with Firebase Authentication using email and password.
-3. Checks the signed-in email against a hard-coded admin email in `admin.js`.
+3. Checks the signed-in user's Firebase custom claims for `admin: true`.
 4. Loads categories and resources from Firestore.
 5. Allows creating, editing, and deleting:
    - resources
@@ -173,13 +176,15 @@ Examples:
 - local dev: `http://localhost:8000/admin.html`
 - hosted site: `https://<your-site>/admin.html`
 
-### Admin Email
+### Admin Account
 
-The admin email currently hard-coded in the app is:
+The current intended library admin account is:
 
 - `mwinterman@washoecounty.gov`
 
-This is defined in `admin.js` as `ADMIN_EMAIL`.
+However, the admin UI no longer trusts email alone. The account must also have the Firebase Auth custom claim:
+
+- `admin: true`
 
 ### Admin Password
 
@@ -188,8 +193,8 @@ The password is not stored anywhere in this repository.
 To log in successfully, a user must have:
 
 1. a Firebase Authentication user account with email/password sign-in enabled
-2. that account's email set to `mwinterman@washoecounty.gov`
-3. the correct current password for that Firebase Auth account
+2. the correct current password for that Firebase Auth account
+3. the Firebase custom claim `admin: true`
 
 If the password has been lost, recover or reset it in Firebase Authentication. Do not add plaintext passwords to this repository.
 
@@ -198,9 +203,9 @@ If the password has been lost, recover or reset it in Firebase Authentication. D
 The current admin authorization model has two layers:
 
 1. Firebase Authentication sign-in by email and password
-2. client-side email check in `admin.js`
+2. Firestore security rules that allow writes only for users with `request.auth.token.admin == true`
 
-That second step is only a UI gate. Actual protection for Firestore data should be enforced in Firebase security rules. If those rules are too permissive, changing the frontend alone will not secure the data.
+The frontend still hides or shows the admin UI based on the user's token claims, but the real security boundary is Firestore. A user without the `admin` custom claim should be blocked at the database layer even if they tamper with the browser UI.
 
 ## Local Development
 
@@ -211,8 +216,9 @@ You need:
 - a web browser
 - internet access to load the Firebase CDN modules and Google Fonts
 - access to the configured Firebase project if you want the live app and admin functions to work
+- Node.js if you want to run the one-time admin-claim setup script locally
 
-No Node.js install is required for the current repo as written.
+Node.js is not required to run the site itself, but it is required for the `tools/set_admin_claim.mjs` script.
 
 ### Why You Should Use a Local Web Server
 
@@ -330,9 +336,9 @@ Implications:
 3. Enter the Firebase Auth password for that account.
 4. Click `Log In`.
 
-If login succeeds and the email matches `ADMIN_EMAIL`, the admin panels are shown.
+If login succeeds and the account has the `admin` custom claim, the admin panels are shown.
 
-If login succeeds but the email does not match `ADMIN_EMAIL`, the UI signs the user back out and shows a not-authorized message.
+If login succeeds but the account does not have the `admin` custom claim, the UI signs the user back out and shows a not-authorized message.
 
 ### Resource Management
 
@@ -419,14 +425,35 @@ A likely deployment setup is Firebase Hosting or another static host such as Git
 Before pushing to production, verify:
 
 1. the Firebase project config points at the intended environment
-2. Firestore rules protect write access appropriately
+2. Firestore rules from `firestore.rules` have been published to the intended project
 3. Firebase Auth email/password sign-in is enabled
 4. the admin user exists in Firebase Auth
-5. the admin password is known and stored in an approved password manager
+5. the admin user has the Firebase custom claim `admin: true`
 6. `resources` and `categories` collections exist and contain expected data
 7. contact email targets are still correct
 8. branding assets and footer text are current
 9. the site works on mobile and desktop browsers
+10. the admin password is known and stored in an approved password manager
+
+## Admin Claim Setup
+
+Use `tools/set_admin_claim.mjs` to grant the Firebase `admin` custom claim before publishing the hardened Firestore rules.
+
+### Safe Rollout Order
+
+1. Install the Node dependency:
+   - `npm install`
+2. Obtain a Firebase service account credential for the target project.
+3. Set `GOOGLE_APPLICATION_CREDENTIALS` to the service account JSON path, or set `FIREBASE_SERVICE_ACCOUNT_JSON` to the JSON contents.
+4. Run:
+   - `npm run set-admin-claim -- --email mwinterman@washoecounty.gov --admin true`
+5. Sign out and sign back into the admin UI so the new claim appears in the client token.
+6. Publish `firestore.rules` in Firebase Console or through the Firebase CLI.
+7. Confirm the admin UI still loads and that writes succeed.
+
+### Why Order Matters
+
+If you publish `firestore.rules` before the admin account has the `admin` custom claim, the admin UI may still load briefly, but Firestore writes will be denied and you can lock yourself out of editing until the claim is added.
 
 ## Firestore and Auth Setup Checklist
 
@@ -439,9 +466,10 @@ If recreating the project from scratch:
 5. Create the admin user:
    - email: `mwinterman@washoecounty.gov`
    - password: set this in Firebase Auth or through the Admin SDK, then store it outside the repo
-6. Configure Firestore security rules.
-7. Serve this site and confirm the client can read the intended collections.
-8. Log into `admin.html` and confirm create/edit/delete behavior.
+6. Grant that user the custom claim `admin: true`.
+7. Configure Firestore security rules from `firestore.rules`.
+8. Serve this site and confirm the client can read the intended collections.
+9. Log into `admin.html` and confirm create/edit/delete behavior.
 
 ## Operational Notes
 
@@ -481,7 +509,7 @@ Current limitations in the repo as it stands:
 - no deduplicating import flow
 - client-side filtering loads entire collections into the browser
 - contact form depends on `mailto:`
-- admin authorization includes a client-side hard-coded email check
+- no external-org ownership or review workflow yet
 
 ## Troubleshooting
 
@@ -508,9 +536,10 @@ Check:
 
 - that Email/Password auth is enabled in Firebase
 - that the user account exists
-- that the email is exactly `mwinterman@washoecounty.gov`
+- that the user has the `admin: true` custom claim
 - that the password is correct
 - that the site can reach Firebase Auth endpoints
+- if the claim was just granted, sign out and sign back in
 
 ### Admin Loads But Writes Fail
 
@@ -524,9 +553,9 @@ Check:
 
 If you are actively maintaining this project, the highest-value follow-up work is:
 
-1. add Firestore rules and document them in the repo
+1. publish and verify `firestore.rules` in the live Firebase project
 2. replace `mailto:` contact flow with a real submission backend
-3. keep the taxonomy vocabulary normalized and aligned between Firestore and `categories.json`
+3. build organization ownership, membership, and review workflows for external editors
 
 ## Maintenance Ownership Notes
 
