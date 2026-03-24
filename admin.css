@@ -225,6 +225,47 @@ body {
 
 .editor textarea { min-height: 60px; resize: vertical; }
 
+.field-list-group {
+  display: grid;
+  gap: 8px;
+}
+
+.field-list-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.field-list-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.field-phone-row {
+  grid-template-columns: minmax(140px, 0.8fr) minmax(220px, 1.4fr) auto;
+}
+
+.field-list-row input {
+  margin: 0;
+}
+
+.field-list-add-btn,
+.field-list-remove-btn {
+  border: 1px solid #cbd5f5;
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field-list-add-btn:hover,
+.field-list-remove-btn:hover {
+  background: #eef2ff;
+}
+
 /* ------------------------------------------------------
    NESTED CATEGORIES
 ------------------------------------------------------ */

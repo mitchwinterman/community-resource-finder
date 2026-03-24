@@ -2,6 +2,13 @@
 
 import { db } from "./firebase.js";
 import {
+    normalizeWebsiteList,
+    normalizePhoneEntries,
+    getPhoneHref,
+    getPhoneDisplayText,
+    getWebsiteDisplayText
+} from "./contact-fields.js";
+import {
     collection,
     getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -132,6 +139,20 @@ function getPlainText(value) {
 function formatArrayForDisplay(values, formatter = null) {
     const items = normalizeStringArray(values);
     return items.map(item => formatter ? formatter(item) : item).join(", ");
+}
+
+function getResourceWebsites(resource) {
+    if (Array.isArray(resource?.Websites)) {
+        return normalizeWebsiteList(resource.Websites);
+    }
+    return normalizeWebsiteList(resource?.Website);
+}
+
+function getResourcePhoneNumbers(resource) {
+    if (Array.isArray(resource?.PhoneNumbers)) {
+        return normalizePhoneEntries(resource.PhoneNumbers);
+    }
+    return normalizePhoneEntries(resource?.Phone);
 }
 
 function getSafeHref(rawValue, allowBareDomain = false) {
@@ -286,12 +307,77 @@ function appendDetailField(label, value, options = {}) {
     detailsDiv.appendChild(field);
 }
 
+function appendDetailListField(label, values, options = {}) {
+    const items = Array.isArray(values)
+        ? values.filter(item => {
+            if (options.displayFormatter) {
+                return normalizeString(options.displayFormatter(item));
+            }
+            return normalizeString(item);
+        })
+        : [];
+    if (!items.length) {
+        appendDetailField(label, "");
+        return;
+    }
+
+    const field = document.createElement("div");
+    field.className = "details-field";
+
+    const labelEl = document.createElement("strong");
+    labelEl.textContent = `${label}:`;
+    field.appendChild(labelEl);
+    field.appendChild(document.createTextNode(" "));
+
+    const list = document.createElement("ul");
+    list.style.margin = "6px 0 0 18px";
+    list.style.padding = "0";
+
+    items.forEach(item => {
+        const entry = document.createElement("li");
+        const displayText = options.displayFormatter
+            ? normalizeString(options.displayFormatter(item))
+            : normalizeString(item);
+
+        if (options.link) {
+            const href = getSafeHref(String(item ?? ""), true);
+            if (href) {
+                const link = document.createElement("a");
+                link.href = href;
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                link.textContent = displayText;
+                entry.appendChild(link);
+            } else {
+                entry.textContent = displayText;
+            }
+        } else if (options.tel) {
+            const href = getPhoneHref(item);
+            if (href) {
+                const link = document.createElement("a");
+                link.href = href;
+                link.textContent = displayText;
+                entry.appendChild(link);
+            } else {
+                entry.textContent = displayText;
+            }
+        } else {
+            entry.textContent = displayText;
+        }
+
+        list.appendChild(entry);
+    });
+
+    field.appendChild(list);
+    detailsDiv.appendChild(field);
+}
+
 function getResourceSelectionKey(resource) {
     return [
         normalizeString(resource.Organization),
         normalizeString(resource.Address),
-        normalizeString(resource.Phone),
-        normalizeString(resource.Website)
+        getResourcePhoneNumbers(resource).map(getPhoneDisplayText).join(" | "),
+        getResourceWebsites(resource).join(" | ")
     ].join("|");
 }
 
@@ -368,13 +454,16 @@ function showDetails(resource) {
         createTextBlock("div", "details-title", normalizeString(resource.Organization) || "No name")
     );
 
+    const phones = getResourcePhoneNumbers(resource);
+    const websites = getResourceWebsites(resource);
+
     appendDetailField("Description", resource.Description, { richText: true });
     appendDetailField("Address", resource.Address);
     appendDetailField("City", resource.City);
     appendDetailField("Zip", resource.Zip);
-    appendDetailField("Phone", resource.Phone);
+    appendDetailListField("Phone", phones, { tel: true, displayFormatter: getPhoneDisplayText });
     appendDetailField("Email", resource.Email);
-    appendDetailField("Website", resource.Website, { link: true });
+    appendDetailListField("Website", websites, { link: true, displayFormatter: getWebsiteDisplayText });
     appendDetailField("Categories", formatArrayForDisplay(resource.Categories));
     appendDetailField("Subcategories", formatArrayForDisplay(resource.Subcategories, formatSubcategoryLabel));
     appendDetailField("Eligibility", resource.Eligibility);
@@ -452,12 +541,16 @@ function applyFilters() {
         const subcategories = normalizeStringArray(resource.Subcategories);
 
         if (searchTerm) {
+            const phones = getResourcePhoneNumbers(resource);
+            const websites = getResourceWebsites(resource);
             const searchFields = [
                 normalizeString(resource.Organization),
                 getPlainText(resource.Description),
                 categories.join(" "),
                 subcategories.join(" "),
-                normalizeString(resource.Keywords)
+                normalizeString(resource.Keywords),
+                phones.map(getPhoneDisplayText).join(" "),
+                websites.map(item => getWebsiteDisplayText(item)).join(" ")
             ].join(" ").toLowerCase();
 
             if (!searchFields.includes(searchTerm)) {

@@ -22,6 +22,10 @@ import {
   canonicalizeSubcategoryInput,
   formatNormalizationChange
 } from "./taxonomy-rules.js";
+import {
+  normalizeWebsiteList,
+  normalizePhoneEntries
+} from "./contact-fields.js";
 
 // ------------------------------------------------------
 // CONFIG
@@ -424,6 +428,93 @@ function buildFieldRichText(fieldKey, label, htmlValue = "", deltaValue = null) 
   return wrap;
 }
 
+function buildFieldStringList(fieldKey, label, values = [], placeholder = "") {
+  const wrap = createEl("div", {
+    className: "field-group field-list-group",
+    attrs: { "data-field": fieldKey, "data-type": "stringlist" }
+  });
+  const lbl = createEl("label", { className: "field-label", text: label });
+  const list = createEl("div", { className: "field-list-rows" });
+  const addBtn = createEl("button", {
+    className: "field-list-add-btn",
+    text: `+ Add ${label.endsWith("s") ? label.slice(0, -1) : label}`
+  });
+  addBtn.type = "button";
+
+  function addRow(initialValue = "") {
+    const row = createEl("div", { className: "field-list-row" });
+    const input = createEl("input", { attrs: { type: "text", placeholder } });
+    input.value = normalizeString(initialValue);
+
+    const removeBtn = createEl("button", { className: "field-list-remove-btn", text: "Remove" });
+    removeBtn.type = "button";
+    removeBtn.addEventListener("click", () => row.remove());
+
+    row.appendChild(input);
+    row.appendChild(removeBtn);
+    list.appendChild(row);
+  }
+
+  const initialValues = Array.isArray(values) ? values : [];
+  if (initialValues.length) {
+    initialValues.forEach(value => addRow(value));
+  } else {
+    addRow("");
+  }
+
+  addBtn.addEventListener("click", () => addRow(""));
+
+  wrap.appendChild(lbl);
+  wrap.appendChild(list);
+  wrap.appendChild(addBtn);
+  return wrap;
+}
+
+function buildFieldPhoneList(fieldKey, label, values = []) {
+  const wrap = createEl("div", {
+    className: "field-group field-list-group",
+    attrs: { "data-field": fieldKey, "data-type": "phoneentries" }
+  });
+  const lbl = createEl("label", { className: "field-label", text: label });
+  const list = createEl("div", { className: "field-list-rows" });
+  const addBtn = createEl("button", {
+    className: "field-list-add-btn",
+    text: "+ Add Phone Number"
+  });
+  addBtn.type = "button";
+
+  function addRow(entry = {}) {
+    const row = createEl("div", { className: "field-list-row field-phone-row" });
+    const labelInput = createEl("input", { attrs: { type: "text", placeholder: "Label (optional)" } });
+    const numberInput = createEl("input", { attrs: { type: "text", placeholder: "(775) 555-1234" } });
+    labelInput.value = normalizeString(entry.label);
+    numberInput.value = normalizeString(entry.number);
+
+    const removeBtn = createEl("button", { className: "field-list-remove-btn", text: "Remove" });
+    removeBtn.type = "button";
+    removeBtn.addEventListener("click", () => row.remove());
+
+    row.appendChild(labelInput);
+    row.appendChild(numberInput);
+    row.appendChild(removeBtn);
+    list.appendChild(row);
+  }
+
+  const initialValues = Array.isArray(values) ? values : [];
+  if (initialValues.length) {
+    initialValues.forEach(value => addRow(value));
+  } else {
+    addRow({});
+  }
+
+  addBtn.addEventListener("click", () => addRow({}));
+
+  wrap.appendChild(lbl);
+  wrap.appendChild(list);
+  wrap.appendChild(addBtn);
+  return wrap;
+}
+
 function buildNestedCategorySelector(selectedCategories, selectedSubcategories) {
   const wrapper = createEl("div", {
     className: "field-group",
@@ -543,8 +634,17 @@ function buildResourceForm(data) {
   resourceForm.appendChild(buildNestedCategorySelector(data.Categories, data.Subcategories));
 
   resourceForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
-  resourceForm.appendChild(buildFieldText("Website", "Website", data.Website || "", false));
-  resourceForm.appendChild(buildFieldText("Phone", "Phone", data.Phone || "", false));
+  resourceForm.appendChild(buildFieldStringList(
+    "Websites",
+    "Websites",
+    normalizeWebsiteList(Array.isArray(data.Websites) ? data.Websites : data.Website),
+    "https://example.org"
+  ));
+  resourceForm.appendChild(buildFieldPhoneList(
+    "PhoneNumbers",
+    "Phone Numbers",
+    normalizePhoneEntries(Array.isArray(data.PhoneNumbers) ? data.PhoneNumbers : data.Phone)
+  ));
   resourceForm.appendChild(buildFieldText("Email", "Email", data.Email || "", false));
   resourceForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
   resourceForm.appendChild(buildFieldText("City", "City", data.City || "", false));
@@ -605,9 +705,36 @@ function collectResourcePayload() {
       continue;
     }
 
+    if (type === "stringlist") {
+      const values = Array.from(g.querySelectorAll(".field-list-row input"))
+        .map(input => normalizeString(input.value))
+        .filter(Boolean);
+
+      payload[field] = values;
+      continue;
+    }
+
+    if (type === "phoneentries") {
+      const values = Array.from(g.querySelectorAll(".field-phone-row"))
+        .map(row => {
+          const inputs = row.querySelectorAll("input");
+          const label = normalizeString(inputs[0]?.value);
+          const number = normalizeString(inputs[1]?.value);
+          if (!number) return null;
+          return label ? { label, number } : { number };
+        })
+        .filter(Boolean);
+
+      payload[field] = values;
+      continue;
+    }
+
     const input = g.querySelector("input, textarea");
     payload[field] = input ? input.value : "";
   }
+
+  payload.Website = "";
+  payload.Phone = "";
 
   return payload;
 }

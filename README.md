@@ -2,7 +2,7 @@
 
 Community Resource Finder is a Firebase-backed directory for browsing community services, filtering them by category and subcategory, and maintaining the directory through a browser-based admin panel.
 
-This repository currently contains the public site, the admin interface, the Firebase client configuration, shared taxonomy normalization rules, and legacy JSON source files from the original Firestore seed process.
+This repository currently contains the public site, the admin interface, the Firebase client configuration, shared normalization rules for taxonomy and contact fields, and legacy JSON source files from the original Firestore seed process.
 
 ## What This Project Does
 
@@ -37,6 +37,7 @@ Top-level files:
 - `admin.js`: admin authentication and CRUD operations for resources and categories
 - `admin.css`: admin styling
 - `taxonomy-rules.js`: shared taxonomy normalization rules used by the admin category editor
+- `contact-fields.js`: shared website and phone normalization helpers used by the app and admin
 - `firebase.js`: Firebase app, Firestore, and Auth initialization
 - `data.json`: legacy resource data snapshot retained for reference
 - `categories.json`: canonical category/subcategory snapshot retained for reference
@@ -102,8 +103,13 @@ Each document in `resources` is expected to look roughly like this:
   "Address": "123 Main St",
   "City": "Reno",
   "Zip": "89501",
-  "Phone": "(775) 555-1234",
-  "Website": "example.org",
+  "Phone": "",
+  "Website": "",
+  "PhoneNumbers": [
+    { "number": "(775) 555-1234" },
+    { "label": "Main Office", "number": "775-555-5678" }
+  ],
+  "Websites": ["https://example.org", "https://example.org/help"],
   "Categories": ["Housing & Homelessness", "Food & Basic Needs"],
   "Subcategories": ["Emergency Shelter", "Food Pantry"],
   "Email": "info@example.org",
@@ -129,6 +135,9 @@ Notes:
 - `Description` and `Notes` contain sanitized HTML for public rendering.
 - `DescriptionDelta` and `NotesDelta` store Quill Delta data for safer structured editing in the admin panel.
 - `Categories` and `Subcategories` are stored as arrays of strings.
+- `Websites` is stored as an array of strings.
+- `PhoneNumbers` is stored as an array of objects with `number` and optional `label`.
+- `Website` and `Phone` are legacy fields and should remain blank after migration.
 - `Last Verified` is stored as a string in `YYYY-MM-DD` format when entered through the admin UI.
 
 ### `categories` Collection
@@ -251,6 +260,8 @@ The public search input searches across these fields:
 - `Categories`
 - `Subcategories`
 - `Keywords`
+- `PhoneNumbers`
+- `Websites`
 
 Search is case-insensitive and uses substring matching.
 
@@ -341,8 +352,8 @@ The current resource editor includes:
 - `Description`
 - `Categories & Subcategories`
 - `Keywords`
-- `Website`
-- `Phone`
+- `Websites`
+- `Phone Numbers`
 - `Email`
 - `Address`
 - `City`
@@ -373,6 +384,8 @@ The admin resource editor uses a nested category selector:
 Selected categories and subcategories are saved back to Firestore as arrays.
 
 When saving categories, known deprecated subcategory labels are automatically normalized to the current canonical labels.
+
+When saving resources, websites are saved in `Websites`, and phone entries are saved in `PhoneNumbers` with optional labels such as `Main`, `Office`, or `Cell`. The legacy `Website` and `Phone` fields are cleared.
 
 ### Category Management
 
@@ -437,7 +450,7 @@ If recreating the project from scratch:
 The current dataset appears to contain some inconsistent values, placeholder blanks, and formatting issues. Examples include:
 
 - blank fields represented as `" "` instead of empty strings
-- multiple websites stored in a single `Website` field
+- the legacy `data.json` snapshot still contains old single-string website and phone formats
 - the legacy `data.json` snapshot may not match the cleaned live taxonomy exactly
 
 Treat the data model as operationally useful but not yet normalized.
@@ -506,10 +519,6 @@ Check:
 - Firestore rules
 - browser console errors
 - that the authenticated user has permission to write the `resources` and `categories` collections
-
-### Import Runs But Duplicates Appear
-
-That is expected if the importer has been run more than once without clearing or deduplicating the target collections.
 
 ## Suggested Next Maintenance Steps
 
