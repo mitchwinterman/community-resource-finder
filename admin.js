@@ -182,11 +182,11 @@ const orgEditableResourceFields = [
   "NotesDelta"
 ];
 const requestReviewFieldConfig = [
-  { field: "Organization", label: "Organization" },
-  { field: "Description", label: "Description", type: "richtext" },
+  { field: "Organization", label: "Resource" },
+  { field: "Description", label: "Short Description", type: "richtext" },
+  { field: "Notes", label: "Detailed Description", type: "richtext" },
   { field: "Categories", label: "Categories", type: "string-array" },
   { field: "Subcategories", label: "Subcategories", type: "string-array" },
-  { field: "Keywords", label: "Keywords" },
   { field: "Websites", label: "Websites", type: "website-array" },
   { field: "PhoneNumbers", label: "Phone Numbers", type: "phone-array" },
   { field: "Email", label: "Email", type: "email" },
@@ -197,8 +197,8 @@ const requestReviewFieldConfig = [
   { field: "Eligibility", label: "Eligibility" },
   { field: "Cost", label: "Cost" },
   { field: "Languages", label: "Languages" },
+  { field: "Keywords", label: "Keywords" },
   { field: "Last Verified", label: "Last Verified" },
-  { field: "Notes", label: "Notes", type: "richtext" }
 ];
 
 // ------------------------------------------------------
@@ -655,15 +655,20 @@ function buildRequestEditFieldset(data) {
   clearChildren(requestEditForm);
 
   requestEditForm.appendChild(createEl("h4", { text: "Edit Proposed Changes" }));
-  requestEditForm.appendChild(buildFieldText("Organization", "Organization", data.Organization || "", true));
+  requestEditForm.appendChild(buildFieldText("Organization", "Resource", data.Organization || "", true));
   requestEditForm.appendChild(buildFieldRichText(
     "Description",
-    "Description",
+    "Short Description",
     data.Description || "",
     data.DescriptionDelta || null
   ));
+  requestEditForm.appendChild(buildFieldRichText(
+    "Notes",
+    "Detailed Description",
+    data.Notes || "",
+    data.NotesDelta || null
+  ));
   requestEditForm.appendChild(buildNestedCategorySelector(data.Categories, data.Subcategories));
-  requestEditForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
   requestEditForm.appendChild(buildFieldStringList(
     "Websites",
     "Websites",
@@ -683,13 +688,8 @@ function buildRequestEditFieldset(data) {
   requestEditForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
   requestEditForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
   requestEditForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
+  requestEditForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
   requestEditForm.appendChild(buildFieldDate("Last Verified", "Last Verified", data["Last Verified"] || ""));
-  requestEditForm.appendChild(buildFieldRichText(
-    "Notes",
-    "Notes",
-    data.Notes || "",
-    data.NotesDelta || null
-  ));
 }
 
 function collectRequestEditPayload() {
@@ -1280,7 +1280,7 @@ function buildNestedCategorySelector(selectedCategories, selectedSubcategories) 
     }
   });
 
-  const lbl = createEl("div", { className: "field-label", text: "Categories & Subcategories" });
+  const lbl = createEl("div", { className: "field-label", text: "Categories and Subcategories" });
   wrapper.appendChild(lbl);
 
   const container = createEl("div", { className: "cat-nested" });
@@ -1337,13 +1337,10 @@ function buildNestedCategorySelector(selectedCategories, selectedSubcategories) 
       subsWrap.appendChild(createEl("div", { className: "cat-sub-empty", text: "(No subcategories)" }));
     }
 
-    let expanded = false;
+    let expanded = catCb.checked;
 
     function syncSubsUI() {
-      const forceVisible = catCb.checked;
-      const shouldShow = forceVisible || expanded;
-
-      subsWrap.style.display = shouldShow ? "block" : "none";
+      subsWrap.style.display = expanded ? "block" : "none";
 
       subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
         cb.disabled = !catCb.checked;
@@ -1386,7 +1383,7 @@ function buildResourceForm(data) {
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  resourceForm.appendChild(buildFieldText("Organization", "Organization", data.Organization || "", true));
+  resourceForm.appendChild(buildFieldText("Organization", "Resource", data.Organization || "", true));
   resourceForm.appendChild(buildFieldSelect(
     "organizationId",
     "Owning Organization",
@@ -1394,6 +1391,42 @@ function buildResourceForm(data) {
     organizationOptions,
     organizationOptions.length ? "Select organization owner" : "No organizations available"
   ));
+  resourceForm.appendChild(buildFieldRichText(
+    "Description",
+    "Short Description",
+    data.Description || "",
+    data.DescriptionDelta || null
+  ));
+  resourceForm.appendChild(buildFieldRichText(
+    "Notes",
+    "Detailed Description",
+    data.Notes || "",
+    data.NotesDelta || null
+  ));
+
+  resourceForm.appendChild(buildNestedCategorySelector(data.Categories, data.Subcategories));
+
+  resourceForm.appendChild(buildFieldStringList(
+    "Websites",
+    "Websites",
+    normalizeWebsiteList(Array.isArray(data.Websites) ? data.Websites : data.Website),
+    "https://example.org"
+  ));
+  resourceForm.appendChild(buildFieldPhoneList(
+    "PhoneNumbers",
+    "Phone Numbers",
+    normalizePhoneEntries(Array.isArray(data.PhoneNumbers) ? data.PhoneNumbers : data.Phone)
+  ));
+  resourceForm.appendChild(buildFieldText("Email", "Email", data.Email || "", false));
+  resourceForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
+  resourceForm.appendChild(buildFieldText("City", "City", data.City || "", false));
+  resourceForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
+  resourceForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
+  resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
+  resourceForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
+  resourceForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
+  resourceForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
+  resourceForm.appendChild(buildFieldDate("Last Verified", "Last Verified", data["Last Verified"] || ""));
   resourceForm.appendChild(buildFieldSelect(
     "status",
     "Publication Status",
@@ -1417,44 +1450,7 @@ function buildResourceForm(data) {
     ],
     "Select submission state"
   ));
-  resourceForm.appendChild(buildFieldRichText(
-    "Description",
-    "Description",
-    data.Description || "",
-    data.DescriptionDelta || null
-  ));
-
-  resourceForm.appendChild(buildNestedCategorySelector(data.Categories, data.Subcategories));
-
-  resourceForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
-  resourceForm.appendChild(buildFieldStringList(
-    "Websites",
-    "Websites",
-    normalizeWebsiteList(Array.isArray(data.Websites) ? data.Websites : data.Website),
-    "https://example.org"
-  ));
-  resourceForm.appendChild(buildFieldPhoneList(
-    "PhoneNumbers",
-    "Phone Numbers",
-    normalizePhoneEntries(Array.isArray(data.PhoneNumbers) ? data.PhoneNumbers : data.Phone)
-  ));
-  resourceForm.appendChild(buildFieldText("Email", "Email", data.Email || "", false));
-  resourceForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
-  resourceForm.appendChild(buildFieldText("City", "City", data.City || "", false));
-  resourceForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
-  resourceForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
-  resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
-  resourceForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
-  resourceForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
-  resourceForm.appendChild(buildFieldDate("Last Verified", "Last Verified", data["Last Verified"] || ""));
   resourceForm.appendChild(buildFieldText("UpdatedBy", "Updated By", data.UpdatedBy || "", false));
-
-  resourceForm.appendChild(buildFieldRichText(
-    "Notes",
-    "Notes",
-    data.Notes || "",
-    data.NotesDelta || null
-  ));
 
   if (editingResourceId) {
     resourceForm.appendChild(buildReadOnlyMetaField("Created", formatTimestampValue(data.createdAt)));

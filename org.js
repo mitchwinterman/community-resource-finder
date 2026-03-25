@@ -552,7 +552,7 @@ function buildNestedCategorySelector(selectedCategories, selectedSubcategories) 
     }
   });
 
-  wrapper.appendChild(createEl("div", { className: "field-label", text: "Categories & Subcategories" }));
+  wrapper.appendChild(createEl("div", { className: "field-label", text: "Categories and Subcategories" }));
   const container = createEl("div", { className: "cat-nested" });
   const selectedCatSet = new Set(normalizeStringArray(selectedCategories).map(item => item.toLowerCase()));
   const selectedSubSet = new Set(normalizeStringArray(selectedSubcategories).map(item => item.toLowerCase()));
@@ -599,10 +599,9 @@ function buildNestedCategorySelector(selectedCategories, selectedSubcategories) 
       subsWrap.appendChild(createEl("div", { className: "cat-sub-empty", text: "(No subcategories)" }));
     }
 
-    let expanded = false;
+    let expanded = catCb.checked;
     function syncSubsUI() {
-      const shouldShow = catCb.checked || expanded;
-      subsWrap.style.display = shouldShow ? "block" : "none";
+      subsWrap.style.display = expanded ? "block" : "none";
       subsWrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
         cb.disabled = !catCb.checked;
         if (!catCb.checked) cb.checked = false;
@@ -631,10 +630,10 @@ function buildResourceForm(resource) {
   clearChildren(resourceForm);
   submitterNotesInput.value = "";
 
-  resourceForm.appendChild(buildFieldText("Organization", "Organization", resource.Organization || "", true));
-  resourceForm.appendChild(buildFieldRichText("Description", "Description", resource.Description || "", resource.DescriptionDelta || null));
+  resourceForm.appendChild(buildFieldText("Organization", "Resource", resource.Organization || "", true));
+  resourceForm.appendChild(buildFieldRichText("Description", "Short Description", resource.Description || "", resource.DescriptionDelta || null));
+  resourceForm.appendChild(buildFieldRichText("Notes", "Detailed Description", resource.Notes || "", resource.NotesDelta || null));
   resourceForm.appendChild(buildNestedCategorySelector(resource.Categories, resource.Subcategories));
-  resourceForm.appendChild(buildFieldText("Keywords", "Keywords", resource.Keywords || "", false));
   resourceForm.appendChild(buildFieldStringList("Websites", "Websites", normalizeWebsiteList(resource.Websites), "https://example.org"));
   resourceForm.appendChild(buildFieldPhoneList("PhoneNumbers", "Phone Numbers", normalizePhoneEntries(resource.PhoneNumbers)));
   resourceForm.appendChild(buildFieldText("Email", "Email", resource.Email || "", false));
@@ -645,8 +644,8 @@ function buildResourceForm(resource) {
   resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", resource.Eligibility || "", false));
   resourceForm.appendChild(buildFieldText("Cost", "Cost", resource.Cost || "", false));
   resourceForm.appendChild(buildFieldText("Languages", "Languages", resource.Languages || "", false));
+  resourceForm.appendChild(buildFieldText("Keywords", "Keywords", resource.Keywords || "", false));
   resourceForm.appendChild(buildFieldDate("Last Verified", "Last Verified", resource["Last Verified"] || ""));
-  resourceForm.appendChild(buildFieldRichText("Notes", "Notes", resource.Notes || "", resource.NotesDelta || null));
 
   editorTitle.textContent = `Submit Update: ${normalizeString(resource.Organization) || "Resource"}`;
 }
