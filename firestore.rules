@@ -24,8 +24,14 @@ service cloud.firestore {
       return hasActiveMembership() && memberOrganizationId() == organizationId;
     }
 
+    function isPublishedResource() {
+      return resource.data.status == "published";
+    }
+
     match /resources/{resourceId} {
-      allow read: if true;
+      allow read: if isAdmin()
+        || belongsToOrganization(resource.data.organizationId)
+        || isPublishedResource();
       allow create, update, delete: if isAdmin();
     }
 
@@ -51,6 +57,10 @@ service cloud.firestore {
         && request.resource.data.submittedByUid == request.auth.uid
         && request.resource.data.status == "pending";
       allow update, delete: if isAdmin();
+    }
+
+    match /mail_queue/{mailId} {
+      allow read, create, update, delete: if isAdmin();
     }
 
     match /{document=**} {

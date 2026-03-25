@@ -10,7 +10,9 @@ import {
 } from "./contact-fields.js";
 import {
     collection,
-    getDocs
+    getDocs,
+    query,
+    where
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 // -----------------------------
@@ -18,7 +20,10 @@ import {
 // -----------------------------
 async function loadData() {
     try {
-        const snap = await getDocs(collection(db, "resources"));
+        const snap = await getDocs(query(
+            collection(db, "resources"),
+            where("status", "==", "published")
+        ));
         const list = [];
         snap.forEach(docSnap => {
             list.push(docSnap.data());

@@ -180,7 +180,7 @@ Notes:
 - `Website` and `Phone` are legacy fields and should remain blank after migration.
 - `Last Verified` is stored as a string in `YYYY-MM-DD` format when entered through the admin UI.
 - `organizationId` links a resource to its owning document in `organizations`.
-- `status` controls whether the public app should treat the resource as live.
+- `status` controls whether the resource is publicly readable; the public app and Firestore rules both treat only `published` resources as live.
 - `submissionState` is groundwork for the future review workflow.
 
 ### `categories` Collection
@@ -289,6 +289,37 @@ Notes:
 - library admins review them in `admin.html`
 - approving a request copies `proposedData` into the live `resources` doc
 
+### `mail_queue` Collection
+
+This collection is operationally backend-managed and is intended as an outbound message queue for external automation.
+
+Each document is expected to look roughly like this:
+
+```json
+{
+  "to": "user@example.org",
+  "subject": "[CRF] Update approved: Example Organization",
+  "text": "Plain-text email body",
+  "html": "<p>HTML email body</p>",
+  "type": "request_status",
+  "sourceCollection": "resource_change_requests",
+  "sourceId": "<request doc id>",
+  "status": "queued",
+  "createdAt": "<timestamp>",
+  "updatedAt": "<timestamp>",
+  "sentAt": null,
+  "transportMessageId": "",
+  "error": ""
+}
+```
+
+Notes:
+
+- library admins queue these documents from the admin review workflow
+- an external automation tool can process and send these documents
+- approval/rejection emails now flow through this queue
+- future invite/setup emails can reuse the same queue and sender
+
 ## Login Details
 
 ### Unified Login URL
@@ -370,10 +401,10 @@ You need:
 
 - a web browser
 - internet access to load the Firebase CDN modules and Google Fonts
-- access to the configured Firebase project if you want the live app and admin functions to work
-- Node.js if you want to run the one-time admin-claim setup script locally
+- access to the configured Firebase project if you want the live app and admin tools to work
+- Node.js if you want to run local helper scripts such as the admin-claim setup script
 
-Node.js is not required to run the site itself, but it is required for the `tools/set_admin_claim.mjs` script.
+Node.js is not required to run the site itself, but it is required for scripts in `tools/`.
 
 ### Why You Should Use a Local Web Server
 
@@ -642,6 +673,12 @@ Your hosting environment must:
 
 A likely deployment setup is Firebase Hosting or another static host such as GitHub Pages, Netlify, Vercel static hosting, or a simple web server.
 
+### Outbound Mail Queue
+
+The admin review flow writes approval/rejection notifications into the `mail_queue` collection.
+
+That queue is designed to be consumed by an external automation system such as Power Automate. The same queue can later be reused for org-editor invite/setup emails.
+
 ### Production Checklist
 
 Before pushing to production, verify:
@@ -653,10 +690,11 @@ Before pushing to production, verify:
 5. the admin user has the Firebase custom claim `admin: true`
 6. `resources`, `categories`, and `organizations` collections exist and contain expected data
 7. `organization_members` and `resource_change_requests` are configured if the org portal is in use
-8. contact email targets are still correct
-9. branding assets and footer text are current
-10. the site works on mobile and desktop browsers
-11. the admin password is known and stored in an approved password manager
+8. if outbound email automation is enabled, the automation has access to `mail_queue`
+9. contact email targets are still correct
+10. branding assets and footer text are current
+11. the site works on mobile and desktop browsers
+12. the admin password is known and stored in an approved password manager
 
 ## Admin Claim Setup
 

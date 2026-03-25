@@ -280,6 +280,63 @@ function getRequestStatusLabel(value) {
   return "pending";
 }
 
+function escapeHtml(value) {
+  return normalizeString(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes) {
+  const status = normalizeRequestStatus(nextStatus);
+  const recipient = normalizeString(requestDoc?.submittedByEmail);
+  if (!recipient || !["approved", "rejected"].includes(status)) {
+    return null;
+  }
+
+  const resourceName = normalizeString(requestDoc?.resourceName) || "your resource update";
+  const reviewedAt = new Date().toLocaleString();
+  const orgPortalUrl = `${window.location.origin}/login.html`;
+  const intro = status === "approved"
+    ? `Your Community Resource Finder update for "${resourceName}" has been approved.`
+    : `Your Community Resource Finder update for "${resourceName}" has been rejected.`;
+  const subject = `[CRF] Update ${status}: ${resourceName}`;
+  const notesText = normalizeString(reviewNotes);
+
+  const text = [
+    intro,
+    `Reviewed: ${reviewedAt}`,
+    notesText ? "" : "",
+    notesText ? `Library notes:\n${notesText}` : "",
+    "",
+    `Organization portal: ${orgPortalUrl}`,
+    "If you have questions, reply to this email or contact library staff."
+  ].filter(Boolean).join("\n");
+
+  const html = [
+    `<p>${escapeHtml(intro)}</p>`,
+    `<p><strong>Reviewed:</strong> ${escapeHtml(reviewedAt)}</p>`,
+    notesText
+      ? `<p><strong>Library notes:</strong><br>${escapeHtml(notesText).replace(/\r?\n/g, "<br>")}</p>`
+      : "",
+    `<p><a href="${escapeHtml(orgPortalUrl)}">Open the organization portal</a></p>`,
+    "<p>If you have questions, reply to this email or contact library staff.</p>"
+  ].filter(Boolean).join("");
+
+  return {
+    to: recipient,
+    subject,
+    text,
+    html,
+    type: "request_status",
+    sourceCollection: "resource_change_requests",
+    sourceId: normalizeString(requestDoc?.id),
+    status: "queued"
+  };
+}
+
 function getFilteredRequests() {
   return requestMeta.filter(requestDoc => normalizeRequestStatus(requestDoc.status) === activeRequestFilter);
 }
@@ -2081,6 +2138,15 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
     reviewedByEmail: actor.email,
     updatedAt: serverTimestamp()
   });
+
+  const mailPayload = buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes);
+  if (mailPayload) {
+    await addDoc(collection(db, "mail_queue"), {
+      ...mailPayload,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  }
 }
 
 async function reviewRequest(nextStatus) {
