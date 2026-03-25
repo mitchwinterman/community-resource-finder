@@ -72,6 +72,7 @@
             <button class="nav-btn" data-panel="categories">Edit Categories</button>
             <button class="nav-btn" data-panel="organizations">Edit Organizations</button>
             <button class="nav-btn" data-panel="requests">Review Requests</button>
+            <button class="nav-btn" data-panel="mail">Mail Queue</button>
         </div>
 
         <!-- RESOURCES PANEL -->
@@ -286,6 +287,53 @@
                             <button id="edit-request-btn" type="button">Edit</button>
                             <button id="delete-request-btn" type="button" class="danger-btn">Delete</button>
                             <button id="close-request-btn" type="button">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- MAIL PANEL -->
+        <div id="panel-mail" class="panel hidden">
+
+            <div class="panel-header">
+                <h3>Mail Queue</h3>
+                <button id="refresh-mail-btn" type="button">Refresh Mail Queue</button>
+            </div>
+
+            <div class="request-toolbar">
+                <div class="request-filter-tabs" role="tablist" aria-label="Mail queue filters">
+                    <button id="mail-filter-queued" class="request-filter-tab active" type="button">Queued</button>
+                    <button id="mail-filter-sent" class="request-filter-tab" type="button">Sent</button>
+                    <button id="mail-filter-failed" class="request-filter-tab" type="button">Failed</button>
+                </div>
+            </div>
+
+            <div class="admin-split">
+                <div class="admin-list" id="mail-list"></div>
+
+                <div class="admin-editor">
+                    <div id="mail-editor" class="editor hidden">
+                        <h3 id="mail-editor-title">Mail Message</h3>
+                        <div id="mail-summary" class="request-summary"></div>
+
+                        <div class="mail-preview-grid">
+                            <div class="request-block">
+                                <h4>HTML Preview</h4>
+                                <div id="mail-html-preview" class="mail-preview-body"></div>
+                            </div>
+
+                            <div class="request-block">
+                                <h4>Plain Text</h4>
+                                <pre id="mail-text-preview" class="mail-text-preview"></pre>
+                            </div>
+                        </div>
+
+                        <div class="editor-actions">
+                            <button id="retry-mail-btn" type="button">Retry</button>
+                            <button id="delete-mail-btn" type="button" class="danger-btn">Delete</button>
+                            <button id="close-mail-btn" type="button">Close</button>
                         </div>
                     </div>
                 </div>

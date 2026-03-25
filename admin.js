@@ -57,6 +57,7 @@ const panelResources = document.getElementById("panel-resources");
 const panelCategories = document.getElementById("panel-categories");
 const panelOrganizations = document.getElementById("panel-organizations");
 const panelRequests = document.getElementById("panel-requests");
+const panelMail = document.getElementById("panel-mail");
 
 // Resources UI
 const resourceList = document.getElementById("resource-list");
@@ -132,6 +133,21 @@ const editRequestBtn = document.getElementById("edit-request-btn");
 const deleteRequestBtn = document.getElementById("delete-request-btn");
 const closeRequestBtn = document.getElementById("close-request-btn");
 
+// Mail queue UI
+const mailList = document.getElementById("mail-list");
+const mailEditor = document.getElementById("mail-editor");
+const mailEditorTitle = document.getElementById("mail-editor-title");
+const mailSummary = document.getElementById("mail-summary");
+const mailHtmlPreview = document.getElementById("mail-html-preview");
+const mailTextPreview = document.getElementById("mail-text-preview");
+const mailFilterQueuedBtn = document.getElementById("mail-filter-queued");
+const mailFilterSentBtn = document.getElementById("mail-filter-sent");
+const mailFilterFailedBtn = document.getElementById("mail-filter-failed");
+const refreshMailBtn = document.getElementById("refresh-mail-btn");
+const retryMailBtn = document.getElementById("retry-mail-btn");
+const deleteMailBtn = document.getElementById("delete-mail-btn");
+const closeMailBtn = document.getElementById("close-mail-btn");
+
 // ------------------------------------------------------
 // STATE
 // ------------------------------------------------------
@@ -146,10 +162,13 @@ let organizationMeta = [];
 let resourceMeta = [];
 let membershipMeta = [];
 let requestMeta = [];
+let mailMeta = [];
 let navInitialized = false;
 let activeRequestFilter = "pending";
+let activeMailFilter = "queued";
 let selectedRequestIds = new Set();
 let requestEditMode = false;
+let editingMailId = null;
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -278,6 +297,20 @@ function getRequestStatusLabel(value) {
   if (status === "approved") return "accepted";
   if (status === "rejected") return "rejected";
   return "pending";
+}
+
+function normalizeMailStatus(value) {
+  const status = normalizeString(value).toLowerCase();
+  if (["queued", "processing", "sent", "failed"].includes(status)) return status;
+  return "queued";
+}
+
+function getMailStatusLabel(value) {
+  const status = normalizeMailStatus(value);
+  if (status === "processing") return "processing";
+  if (status === "sent") return "sent";
+  if (status === "failed") return "failed";
+  return "queued";
 }
 
 function escapeHtml(value) {
@@ -995,6 +1028,7 @@ onAuthStateChanged(auth, async (user) => {
   await loadResources();
   await loadMemberships();
   await loadReviewRequests();
+  await loadMailQueue();
 });
 
 // ------------------------------------------------------
@@ -1023,6 +1057,7 @@ function setActivePanel(panelName) {
   hide(panelCategories);
   hide(panelOrganizations);
   hide(panelRequests);
+  hide(panelMail);
 
   if (panelName === "categories") {
     show(panelCategories);
@@ -1036,6 +1071,11 @@ function setActivePanel(panelName) {
 
   if (panelName === "requests") {
     show(panelRequests);
+    return;
+  }
+
+  if (panelName === "mail") {
+    show(panelMail);
     return;
   }
 
@@ -2033,6 +2073,50 @@ async function loadReviewRequests() {
   }
 }
 
+async function loadMailQueue() {
+  if (!mailList) return;
+
+  hide(mailEditor);
+  editingMailId = null;
+  mailList.textContent = "Loading...";
+  mailMeta = [];
+
+  try {
+    const snap = await getDocs(collection(db, "mail_queue"));
+    const messages = [];
+
+    snap.forEach(ds => {
+      messages.push({
+        id: ds.id,
+        ...ds.data()
+      });
+    });
+
+    messages.sort((a, b) => {
+      const statusRank = value => {
+        const status = normalizeMailStatus(value);
+        if (status === "queued") return 0;
+        if (status === "processing") return 1;
+        if (status === "failed") return 2;
+        return 3;
+      };
+      const rankDelta = statusRank(a.status) - statusRank(b.status);
+      if (rankDelta !== 0) return rankDelta;
+
+      const aTime = a.updatedAt?.seconds || a.createdAt?.seconds || 0;
+      const bTime = b.updatedAt?.seconds || b.createdAt?.seconds || 0;
+      return bTime - aTime;
+    });
+
+    mailMeta = messages;
+    updateMailFilterUi();
+    renderMailList(getFilteredMail());
+  } catch (err) {
+    console.error("Error loading mail queue:", err);
+    mailList.textContent = "Error loading mail queue.";
+  }
+}
+
 function renderRequestList(requests) {
   clearChildren(requestList);
 
@@ -2083,6 +2167,173 @@ function renderRequestList(requests) {
     row.addEventListener("click", () => openRequestEditor(requestDoc));
     requestList.appendChild(row);
   });
+}
+
+function getFilteredMail() {
+  return mailMeta.filter(mailDoc => {
+    const status = normalizeMailStatus(mailDoc.status);
+    if (activeMailFilter === "failed") return status === "failed";
+    if (activeMailFilter === "sent") return status === "sent";
+    return status === "queued" || status === "processing";
+  });
+}
+
+function updateMailFilterUi() {
+  const tabConfig = [
+    { btn: mailFilterQueuedBtn, status: "queued", label: "Queued", matcher: mailDoc => ["queued", "processing"].includes(normalizeMailStatus(mailDoc.status)) },
+    { btn: mailFilterSentBtn, status: "sent", label: "Sent", matcher: mailDoc => normalizeMailStatus(mailDoc.status) === "sent" },
+    { btn: mailFilterFailedBtn, status: "failed", label: "Failed", matcher: mailDoc => normalizeMailStatus(mailDoc.status) === "failed" }
+  ];
+
+  tabConfig.forEach(({ btn, status, label, matcher }) => {
+    if (!btn) return;
+    const count = mailMeta.filter(matcher).length;
+    btn.textContent = `${label} (${count})`;
+    btn.classList.toggle("active", activeMailFilter === status);
+  });
+}
+
+function setActiveMailFilter(nextFilter) {
+  activeMailFilter = ["queued", "sent", "failed"].includes(nextFilter) ? nextFilter : "queued";
+  const openMail = mailMeta.find(item => item.id === editingMailId);
+  if (openMail) {
+    const visible = getFilteredMail().some(item => item.id === openMail.id);
+    if (!visible) {
+      hide(mailEditor);
+      editingMailId = null;
+    }
+  }
+  updateMailFilterUi();
+  renderMailList(getFilteredMail());
+}
+
+function getMailSummaryText(mailDoc) {
+  const status = getMailStatusLabel(mailDoc.status);
+  const recipient = normalizeString(mailDoc.to) || "(No recipient)";
+  const type = normalizeString(mailDoc.type) || "message";
+  const createdAt = formatTimestampValue(mailDoc.createdAt);
+  return `${recipient} | ${type} | ${status} | ${createdAt}`;
+}
+
+function renderMailList(messages) {
+  clearChildren(mailList);
+
+  if (!messages.length) {
+    mailList.textContent = `No ${activeMailFilter} mail items found.`;
+    return;
+  }
+
+  messages.forEach(mailDoc => {
+    const row = createEl("div", { className: "list-row list-row-stacked" });
+    row.appendChild(createEl("div", {
+      className: "list-row-title",
+      text: normalizeString(mailDoc.subject) || "(No subject)"
+    }));
+    row.appendChild(createEl("div", {
+      className: "list-row-meta",
+      text: getMailSummaryText(mailDoc)
+    }));
+    row.appendChild(createEl("span", {
+      className: `request-status-pill mail-status-pill ${normalizeMailStatus(mailDoc.status)}`,
+      text: getMailStatusLabel(mailDoc.status)
+    }));
+    row.addEventListener("click", () => openMailEditor(mailDoc));
+    mailList.appendChild(row);
+  });
+}
+
+function buildMailMetaBlock(mailDoc) {
+  const block = createEl("div", { className: "request-block" });
+  block.appendChild(createEl("h4", { text: "Mail Summary" }));
+
+  const metaList = createEl("div", { className: "request-meta-list" });
+  const rows = [
+    ["To", normalizeString(mailDoc.to) || "(None)"],
+    ["Subject", normalizeString(mailDoc.subject) || "(None)"],
+    ["Status", getMailStatusLabel(mailDoc.status)],
+    ["Type", normalizeString(mailDoc.type) || "(None)"],
+    ["Created", formatTimestampValue(mailDoc.createdAt)],
+    ["Updated", formatTimestampValue(mailDoc.updatedAt)],
+    ["Sent", formatTimestampValue(mailDoc.sentAt)],
+    ["Source", normalizeString(mailDoc.sourceCollection) && normalizeString(mailDoc.sourceId)
+      ? `${normalizeString(mailDoc.sourceCollection)} / ${normalizeString(mailDoc.sourceId)}`
+      : "(None)"],
+    ["Transport Id", normalizeString(mailDoc.transportMessageId) || "(None)"],
+    ["Error", normalizeString(mailDoc.error) || "(None)"]
+  ];
+
+  rows.forEach(([label, value]) => {
+    const row = createEl("div", { className: "request-meta-row" });
+    row.appendChild(createEl("strong", { text: label }));
+    row.appendChild(createEl("span", { text: value }));
+    metaList.appendChild(row);
+  });
+
+  block.appendChild(metaList);
+  return block;
+}
+
+function openMailEditor(mailDoc) {
+  editingMailId = mailDoc?.id || null;
+  mailEditorTitle.textContent = "Mail Message";
+  clearChildren(mailSummary);
+  clearChildren(mailHtmlPreview);
+  mailTextPreview.textContent = normalizeString(mailDoc?.text) || "(No plain-text body)";
+
+  mailSummary.appendChild(buildMailMetaBlock(mailDoc));
+
+  const htmlBody = normalizeString(mailDoc?.html);
+  if (htmlBody) {
+    appendSafeHtml(mailHtmlPreview, htmlBody);
+  } else {
+    mailHtmlPreview.appendChild(createEl("div", {
+      className: "request-value empty",
+      text: "(No HTML body)"
+    }));
+  }
+
+  const status = normalizeMailStatus(mailDoc?.status);
+  retryMailBtn.disabled = status === "processing";
+
+  show(mailEditor);
+}
+
+async function retryMailItem() {
+  if (!editingMailId) return;
+  const mailDoc = mailMeta.find(item => item.id === editingMailId);
+  if (!mailDoc) return;
+
+  try {
+    await updateDoc(doc(db, "mail_queue", mailDoc.id), {
+      status: "queued",
+      error: "",
+      sentAt: null,
+      processingStartedAt: null,
+      transportMessageId: "",
+      updatedAt: serverTimestamp()
+    });
+    await loadMailQueue();
+  } catch (err) {
+    console.error("Error retrying mail:", err);
+    alert("Error retrying mail. See console for details.");
+  }
+}
+
+async function deleteMailItem() {
+  if (!editingMailId) return;
+  const mailDoc = mailMeta.find(item => item.id === editingMailId);
+  if (!mailDoc) return;
+  if (!confirm("Delete this mail queue item?")) return;
+
+  try {
+    await deleteDoc(doc(db, "mail_queue", mailDoc.id));
+    hide(mailEditor);
+    editingMailId = null;
+    await loadMailQueue();
+  } catch (err) {
+    console.error("Error deleting mail item:", err);
+    alert("Error deleting mail item. See console for details.");
+  }
 }
 
 function openRequestEditor(requestDoc) {
@@ -2276,6 +2527,35 @@ bulkRejectRequestsBtn?.addEventListener("click", async () => {
 
 bulkDeleteRequestsBtn?.addEventListener("click", async () => {
   await applyBulkRequestAction("delete");
+});
+
+mailFilterQueuedBtn?.addEventListener("click", () => {
+  setActiveMailFilter("queued");
+});
+
+mailFilterSentBtn?.addEventListener("click", () => {
+  setActiveMailFilter("sent");
+});
+
+mailFilterFailedBtn?.addEventListener("click", () => {
+  setActiveMailFilter("failed");
+});
+
+refreshMailBtn?.addEventListener("click", async () => {
+  await loadMailQueue();
+});
+
+retryMailBtn?.addEventListener("click", async () => {
+  await retryMailItem();
+});
+
+deleteMailBtn?.addEventListener("click", async () => {
+  await deleteMailItem();
+});
+
+closeMailBtn?.addEventListener("click", () => {
+  hide(mailEditor);
+  editingMailId = null;
 });
 
 // ------------------------------------------------------

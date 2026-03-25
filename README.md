@@ -48,6 +48,8 @@ Top-level files:
 - `firestore.rules`: Cloud Firestore security rules for public reads and admin-only writes
 - `package.json`: Node tooling for one-time Firebase Admin scripts
 - `tools/set_admin_claim.mjs`: one-time script to grant or remove the Firebase `admin` custom claim
+- `tools/mail_worker.mjs`: recurring outbound mail worker that drains `mail_queue` through Outlook Desktop
+- `tools/send_outlook_mail.ps1`: Outlook COM bridge used by the mail worker on Windows
 - `firebase.js`: Firebase app, Firestore, and Auth initialization
 - `data.json`: legacy resource data snapshot retained for reference
 - `categories.json`: canonical category/subcategory snapshot retained for reference
@@ -291,7 +293,7 @@ Notes:
 
 ### `mail_queue` Collection
 
-This collection is operationally backend-managed and is intended as an outbound message queue for external automation.
+This collection is operationally backend-managed and is intended as an outbound message queue.
 
 Each document is expected to look roughly like this:
 
@@ -316,7 +318,7 @@ Each document is expected to look roughly like this:
 Notes:
 
 - library admins queue these documents from the admin review workflow
-- an external automation tool can process and send these documents
+- the Windows Outlook worker in `tools/mail_worker.mjs` can process and send these documents
 - approval/rejection emails now flow through this queue
 - future invite/setup emails can reuse the same queue and sender
 
@@ -677,7 +679,78 @@ A likely deployment setup is Firebase Hosting or another static host such as Git
 
 The admin review flow writes approval/rejection notifications into the `mail_queue` collection.
 
-That queue is designed to be consumed by an external automation system such as Power Automate. The same queue can later be reused for org-editor invite/setup emails.
+The intended sender for this repo is the local Outlook Desktop worker in `tools/mail_worker.mjs`. That worker:
+
+1. reads queued docs from `mail_queue`
+2. opens the signed-in Outlook Desktop profile on a trusted Windows machine
+3. sends the message through Outlook
+4. marks the queue doc `sent` or `failed`
+
+The same queue can later be reused for org-editor invite/setup emails.
+
+### Outlook Mail Worker Setup
+
+The mail worker does not use SMTP credentials. It uses the currently configured Outlook Desktop profile on the Windows machine that runs it.
+
+Requirements:
+
+- Outlook Desktop installed on the machine
+- Outlook configured and signed in with the mailbox you want to send from
+- access to the Firebase service account JSON for this project
+- Node.js installed locally
+
+Optional environment variables:
+
+- `CRF_OUTLOOK_FROM_EMAIL`
+  - if set, the worker tries to send through that Outlook account instead of whatever Outlook picks by default
+- `CRF_PUBLIC_BASE_URL`
+  - if set, the worker rewrites any `localhost` or `127.0.0.1` links inside queued mail bodies to this hosted site base URL
+
+Manual test:
+
+1. queue a test approval or rejection from `admin.html`
+2. in PowerShell, set `GOOGLE_APPLICATION_CREDENTIALS` to the Firebase service account JSON path
+3. optionally set:
+   - `CRF_OUTLOOK_FROM_EMAIL`
+   - `CRF_PUBLIC_BASE_URL`
+4. run:
+   - `npm run mail-worker`
+5. confirm the queue doc changes to `sent`
+
+Example PowerShell session:
+
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\firebase-service-account.json"
+$env:CRF_OUTLOOK_FROM_EMAIL="mwinterman@washoecounty.gov"
+$env:CRF_PUBLIC_BASE_URL="https://your-live-site.example"
+npm.cmd run mail-worker
+```
+
+Task Scheduler command:
+
+Program/script:
+
+```text
+powershell.exe
+```
+
+Add arguments:
+
+```text
+-NoProfile -ExecutionPolicy Bypass -Command "$env:GOOGLE_APPLICATION_CREDENTIALS='C:\path\to\firebase-service-account.json'; $env:CRF_OUTLOOK_FROM_EMAIL='mwinterman@washoecounty.gov'; $env:CRF_PUBLIC_BASE_URL='https://your-live-site.example'; & 'C:\Users\mwinterman\Documents\NODE\node-v25.8.1-win-x64\node.exe' 'C:\Users\mwinterman\Documents\GitHub\community-resource-finder\tools\mail_worker.mjs' --limit 25"
+```
+
+Recommended scheduler settings:
+
+- run every 5 minutes
+- run whether the user is logged on or not
+- use a Windows account that has the correct Outlook profile configured
+
+Operational notes:
+
+- if Outlook is signed out, locked down by policy, or prompts for reauthentication, mail may remain queued or fail
+- if your Windows password or Microsoft 365 password changes, the worker should continue sending after Outlook itself has been reauthenticated
+- this worker is intended for a trusted internal machine, not an end-user workstation
 
 ### Production Checklist
 
@@ -690,7 +763,7 @@ Before pushing to production, verify:
 5. the admin user has the Firebase custom claim `admin: true`
 6. `resources`, `categories`, and `organizations` collections exist and contain expected data
 7. `organization_members` and `resource_change_requests` are configured if the org portal is in use
-8. if outbound email automation is enabled, the automation has access to `mail_queue`
+8. if outbound email is enabled, the machine running `tools/mail_worker.mjs` has Outlook configured and access to the Firebase service account credential
 9. contact email targets are still correct
 10. branding assets and footer text are current
 11. the site works on mobile and desktop browsers

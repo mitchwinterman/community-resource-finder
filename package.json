@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "set-admin-claim": "node tools/set_admin_claim.mjs"
+    "set-admin-claim": "node tools/set_admin_claim.mjs",
+    "mail-worker": "node tools/mail_worker.mjs"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0"
