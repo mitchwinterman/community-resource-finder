@@ -34,8 +34,10 @@ Top-level files:
 - `help.html`: help page
 - `contact.html`: contact and resource suggestion form
 - `admin.html`: admin login and editing interface
-- `admin.js`: admin authentication and CRUD operations for resources and categories
+- `admin.js`: admin authentication and CRUD operations for resources, categories, and organizations
 - `admin.css`: admin styling
+- `ownership-backfill.html`: one-time Phase 2A ownership/status backfill page
+- `ownership-backfill.js`: one-time Phase 2A resource ownership backfill logic
 - `taxonomy-rules.js`: shared taxonomy normalization rules used by the admin category editor
 - `contact-fields.js`: shared website and phone normalization helpers used by the app and admin
 - `firestore.rules`: Cloud Firestore security rules for public reads and admin-only writes
@@ -58,9 +60,10 @@ At startup it:
 1. Connects to Firebase using the config in `firebase.js`.
 2. Reads the `resources` collection from Firestore.
 3. Reads the `categories` collection from Firestore.
-4. Builds the category and subcategory filter dropdowns.
-5. Filters all loaded records client-side in the browser.
-6. Renders a result list on the left and resource details on the right.
+4. Filters the loaded resources so only `published` records are treated as live.
+5. Builds the category and subcategory filter dropdowns.
+6. Filters all loaded records client-side in the browser.
+7. Renders a result list on the left and resource details on the right.
 
 ### Admin App
 
@@ -71,11 +74,12 @@ It:
 1. Shows a login screen.
 2. Signs users in with Firebase Authentication using email and password.
 3. Checks the signed-in user's Firebase custom claims for `admin: true`.
-4. Loads categories and resources from Firestore.
+4. Loads organizations, categories, and resources from Firestore.
 5. Allows creating, editing, and deleting:
    - resources
    - categories
    - subcategories inside category documents
+   - organizations
 
 ## Firebase Configuration
 
@@ -90,10 +94,11 @@ The Firebase web config is committed directly in the repository. That is normal 
 
 ## Data Model
 
-The repo currently uses two Firestore collections:
+The repo currently uses three active Firestore collections:
 
 - `resources`
 - `categories`
+- `organizations`
 
 ### `resources` Collection
 
@@ -122,6 +127,19 @@ Each document in `resources` is expected to look roughly like this:
   "Notes": "Additional notes",
   "DescriptionDelta": { "ops": [] },
   "NotesDelta": { "ops": [] },
+  "organizationId": "<organizations doc id>",
+  "status": "published",
+  "submissionState": "approved",
+  "createdAt": "<timestamp>",
+  "createdByUid": "<uid>",
+  "createdByEmail": "admin@example.org",
+  "updatedAt": "<timestamp>",
+  "updatedByUid": "<uid>",
+  "updatedByEmail": "admin@example.org",
+  "lastSubmittedAt": "<timestamp>",
+  "lastSubmittedBy": "<uid>",
+  "lastApprovedAt": "<timestamp>",
+  "lastApprovedBy": "<uid>",
   "Last Verified": "2026-03-01",
   "Keywords": "housing, shelter, pantry",
   "UpdatedBy": "Staff Name",
@@ -142,6 +160,9 @@ Notes:
 - `PhoneNumbers` is stored as an array of objects with `number` and optional `label`.
 - `Website` and `Phone` are legacy fields and should remain blank after migration.
 - `Last Verified` is stored as a string in `YYYY-MM-DD` format when entered through the admin UI.
+- `organizationId` links a resource to its owning document in `organizations`.
+- `status` controls whether the public app should treat the resource as live.
+- `submissionState` is groundwork for the future review workflow.
 
 ### `categories` Collection
 
@@ -162,6 +183,33 @@ Notes:
 
 - The public site reads category names from these documents.
 - The admin site uses these documents to build its nested category/subcategory selector.
+
+### `organizations` Collection
+
+Each document in `organizations` is expected to look roughly like this:
+
+```json
+{
+  "name": "Domestic Violence Resource Center",
+  "status": "active",
+  "primaryEmail": "info@example.org",
+  "phone": "(775) 555-1234",
+  "website": "https://example.org",
+  "notes": "Internal ownership notes",
+  "createdAt": "<timestamp>",
+  "createdBy": "<uid>",
+  "createdByEmail": "admin@example.org",
+  "updatedAt": "<timestamp>",
+  "updatedBy": "<uid>",
+  "updatedByEmail": "admin@example.org"
+}
+```
+
+Notes:
+
+- this collection is admin-only in the current Firestore rules
+- Phase 2 uses it as the owner lookup for `resources.organizationId`
+- future org-user login and membership work will build on this collection
 
 ## Login Details
 
@@ -254,6 +302,7 @@ After starting a local server, these pages should be available:
 - `/help.html`
 - `/contact.html`
 - `/admin.html`
+- `/ownership-backfill.html`
 
 ## Public Site Behavior
 
@@ -355,6 +404,9 @@ The Resources panel allows staff to:
 The current resource editor includes:
 
 - `Organization`
+- `Owning Organization`
+- `Publication Status`
+- `Submission State`
 - `Description`
 - `Categories & Subcategories`
 - `Keywords`
@@ -393,6 +445,17 @@ When saving categories, known deprecated subcategory labels are automatically no
 
 When saving resources, websites are saved in `Websites`, and phone entries are saved in `PhoneNumbers` with optional labels such as `Main`, `Office`, or `Cell`. The legacy `Website` and `Phone` fields are cleared.
 
+### Organization Management
+
+The Organizations panel allows library admins to:
+
+- view all organization owner records
+- create a new organization owner
+- edit organization status and contact information
+- delete organizations that are not currently attached to resources
+
+These organization records are the source of truth for `resources.organizationId`.
+
 ### Category Management
 
 The Categories panel allows staff to:
@@ -403,6 +466,26 @@ The Categories panel allows staff to:
 - add or remove subcategories
 - save changes
 - delete categories
+
+### Ownership Backfill
+
+Use `ownership-backfill.html` after creating organization records in `admin.html`.
+
+The tool:
+
+- can bootstrap organization owner records directly from unique existing resource names
+- loads resources missing `organizationId`, `status`, or `submissionState`
+- suggests an owner when the resource name exactly matches an organization record
+- lets a library admin assign ownership manually when there is no safe exact match
+- backfills default publication metadata onto older resource docs
+
+Recommended order:
+
+1. publish the updated `firestore.rules`
+2. either create organization records in `admin.html` or use `Bootstrap Organizations` in `ownership-backfill.html`
+3. run the backfill preview in `ownership-backfill.html`
+4. run the backfill
+5. spot-check resources in `admin.html`
 
 ## Deployment
 
@@ -429,7 +512,7 @@ Before pushing to production, verify:
 3. Firebase Auth email/password sign-in is enabled
 4. the admin user exists in Firebase Auth
 5. the admin user has the Firebase custom claim `admin: true`
-6. `resources` and `categories` collections exist and contain expected data
+6. `resources`, `categories`, and `organizations` collections exist and contain expected data
 7. contact email targets are still correct
 8. branding assets and footer text are current
 9. the site works on mobile and desktop browsers
@@ -555,7 +638,11 @@ If you are actively maintaining this project, the highest-value follow-up work i
 
 1. publish and verify `firestore.rules` in the live Firebase project
 2. replace `mailto:` contact flow with a real submission backend
-3. build organization ownership, membership, and review workflows for external editors
+3. complete Phase 2B by adding organization memberships, an org-user portal, and review-before-publish change requests
+
+The Phase 2 ownership and review design is documented in:
+
+- `docs/phase-2-org-ownership-plan.md`
 
 ## Maintenance Ownership Notes
 

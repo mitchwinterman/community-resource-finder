@@ -116,6 +116,11 @@ function normalizeStringArray(value) {
     return value.map(item => normalizeString(item)).filter(Boolean);
 }
 
+function isResourcePublished(resource) {
+    const status = normalizeString(resource?.status).toLowerCase();
+    return !status || status === "published";
+}
+
 function formatSubcategoryLabel(label) {
     if (!label) return "";
     const lower = label.toLowerCase();
@@ -586,7 +591,7 @@ async function init() {
     updateResultCount(0);
 
     const [data, rawCats] = await Promise.all([loadData(), loadCategories()]);
-    globalData = Array.isArray(data) ? data : [];
+    globalData = Array.isArray(data) ? data.filter(isResourcePublished) : [];
 
     const categoryLabels = rawCats ? Object.keys(rawCats) : [];
     categoryOptions = [];

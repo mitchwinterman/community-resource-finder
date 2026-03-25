@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Ownership Backfill - Community Resource Finder</title>
+    <link rel="stylesheet" href="admin.css" />
+    <style>
+        .tool-shell {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .tool-toolbar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin: 18px 0;
+        }
+
+        .tool-toolbar button {
+            padding: 9px 14px;
+            border: none;
+            border-radius: 999px;
+            background: #2563eb;
+            color: #fff;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .tool-toolbar button.secondary {
+            background: #475569;
+        }
+
+        .tool-log {
+            min-height: 120px;
+            padding: 12px;
+            border: 1px solid #cbd5f5;
+            border-radius: 10px;
+            background: #fff;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+
+        .backfill-grid {
+            display: grid;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .backfill-row {
+            display: grid;
+            grid-template-columns: minmax(240px, 1.1fr) minmax(220px, 1fr) minmax(220px, 1fr) 150px 170px;
+            gap: 10px;
+            align-items: start;
+            padding: 12px;
+            border: 1px solid #dbe4ff;
+            border-radius: 12px;
+            background: #f8fbff;
+        }
+
+        .backfill-resource strong {
+            display: block;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+
+        .backfill-note {
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        .backfill-cell label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: #475569;
+        }
+
+        .backfill-cell select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #cbd5f5;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        @media (max-width: 1100px) {
+            .backfill-row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="login-screen" class="screen">
+        <h1>Ownership Backfill Login</h1>
+        <input id="email" type="email" placeholder="Email" />
+        <input id="password" type="password" placeholder="Password" />
+        <button id="loginBtn">Log In</button>
+        <div id="login-error"></div>
+    </div>
+
+    <div id="tool-screen" class="screen hidden">
+        <div class="tool-shell">
+            <div class="topbar">
+                <div class="topbar-left"></div>
+                <div class="topbar-center">
+                    <div class="topbar-text">
+                        <span class="topbar-title">Ownership Backfill</span>
+                        <span class="topbar-subtitle">Phase 2A Migration Tool</span>
+                    </div>
+                </div>
+                <div class="topbar-right">
+                    <button id="logoutBtn">Log Out</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <p>
+                    Create organization records in <code>admin.html</code> first. Then use this page to assign
+                    existing resources to an owning organization and to backfill publication metadata.
+                </p>
+
+                <div class="tool-toolbar">
+                    <button id="bootstrapBtn">Bootstrap Organizations</button>
+                    <button id="previewBtn">Preview Backfill</button>
+                    <button id="runBtn" class="secondary">Run Backfill</button>
+                </div>
+
+                <div id="log" class="tool-log"></div>
+                <div id="rows" class="backfill-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="ownership-backfill.js"></script>
+</body>
+</html>

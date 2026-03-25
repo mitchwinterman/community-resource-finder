@@ -11,6 +11,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 import {
@@ -46,6 +47,7 @@ const logoutBtn = document.getElementById("logoutBtn");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const panelResources = document.getElementById("panel-resources");
 const panelCategories = document.getElementById("panel-categories");
+const panelOrganizations = document.getElementById("panel-organizations");
 
 // Resources UI
 const resourceList = document.getElementById("resource-list");
@@ -71,12 +73,32 @@ const saveCategoryBtn = document.getElementById("save-category-btn");
 const deleteCategoryBtn = document.getElementById("delete-category-btn");
 const cancelCategoryBtn = document.getElementById("cancel-category-btn");
 
+// Organizations UI
+const organizationList = document.getElementById("organization-list");
+const organizationEditor = document.getElementById("organization-editor");
+const organizationEditorTitle = document.getElementById("organization-editor-title");
+const organizationNameInput = document.getElementById("organization-name-input");
+const organizationStatusInput = document.getElementById("organization-status-input");
+const organizationPrimaryEmailInput = document.getElementById("organization-primary-email-input");
+const organizationPhoneInput = document.getElementById("organization-phone-input");
+const organizationWebsiteInput = document.getElementById("organization-website-input");
+const organizationNotesInput = document.getElementById("organization-notes-input");
+const addOrganizationBtn = document.getElementById("add-organization-btn");
+const saveOrganizationBtn = document.getElementById("save-organization-btn");
+const deleteOrganizationBtn = document.getElementById("delete-organization-btn");
+const cancelOrganizationBtn = document.getElementById("cancel-organization-btn");
+
 // ------------------------------------------------------
 // STATE
 // ------------------------------------------------------
 let editingResourceId = null;
 let editingCategoryId = null;
+let editingOrganizationId = null;
+let editingResourceData = null;
 let categoryMeta = [];
+let organizationMeta = [];
+let resourceMeta = [];
+let navInitialized = false;
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -111,6 +133,33 @@ function normalizeString(v) {
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
   return value.map(item => normalizeString(item)).filter(Boolean);
+}
+
+function getCurrentActorMetadata() {
+  return {
+    uid: auth.currentUser?.uid || "",
+    email: normalizeString(auth.currentUser?.email)
+  };
+}
+
+function getOrganizationDisplayName(org) {
+  return normalizeString(org?.name) || "(Unnamed organization)";
+}
+
+function getOrganizationSummary(org) {
+  const status = normalizeString(org?.status) || "active";
+  const pieces = [status];
+  const email = normalizeString(org?.primaryEmail);
+  if (email) pieces.push(email);
+  return pieces.join(" • ");
+}
+
+function getOrganizationNameById(organizationId) {
+  const targetId = normalizeString(organizationId);
+  if (!targetId) return "";
+
+  const match = organizationMeta.find(org => org.id === targetId);
+  return match ? getOrganizationDisplayName(match) : "";
 }
 
 function createEl(tag, opts = {}) {
@@ -225,6 +274,28 @@ function toDateInputValue(v) {
   return "";
 }
 
+function formatTimestampValue(value) {
+  if (!value) return "";
+
+  if (typeof value?.toDate === "function") {
+    return value.toDate().toLocaleString();
+  }
+
+  if (value instanceof Date) {
+    return value.toLocaleString();
+  }
+
+  const stringValue = normalizeString(value);
+  if (!stringValue) return "";
+
+  const parsed = new Date(stringValue);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleString();
+  }
+
+  return stringValue;
+}
+
 // ------------------------------------------------------
 // AUTH
 // ------------------------------------------------------
@@ -277,6 +348,7 @@ onAuthStateChanged(auth, async (user) => {
 
   initNav();
 
+  await loadOrganizations();
   await loadCategories();
   await loadResources();
 });
@@ -285,10 +357,16 @@ onAuthStateChanged(auth, async (user) => {
 // NAV
 // ------------------------------------------------------
 function initNav() {
+  if (navInitialized) {
+    setActivePanel("resources");
+    return;
+  }
+
   navButtons.forEach(btn => {
     btn.addEventListener("click", () => setActivePanel(btn.dataset.panel));
   });
 
+  navInitialized = true;
   setActivePanel("resources");
 }
 
@@ -297,13 +375,21 @@ function setActivePanel(panelName) {
   const active = navButtons.find(b => b.dataset.panel === panelName);
   active?.classList.add("active");
 
+  hide(panelResources);
+  hide(panelCategories);
+  hide(panelOrganizations);
+
   if (panelName === "categories") {
-    hide(panelResources);
     show(panelCategories);
-  } else {
-    show(panelResources);
-    hide(panelCategories);
+    return;
   }
+
+  if (panelName === "organizations") {
+    show(panelOrganizations);
+    return;
+  }
+
+  show(panelResources);
 }
 
 // ------------------------------------------------------
@@ -316,6 +402,7 @@ function getResourceDisplayName(resource) {
 async function loadResources() {
   hide(resourceEditor);
   editingResourceId = null;
+  editingResourceData = null;
 
   resourceList.textContent = "Loading...";
 
@@ -330,6 +417,7 @@ async function loadResources() {
       return an.localeCompare(bn);
     });
 
+    resourceMeta = resources;
     renderResourceList(resources);
   } catch (err) {
     console.error("Error loading resources:", err);
@@ -346,7 +434,28 @@ function renderResourceList(resources) {
   }
 
   resources.forEach(r => {
-    const row = createEl("div", { className: "list-row", text: getResourceDisplayName(r) });
+    const row = createEl("div", { className: "list-row list-row-stacked" });
+    row.appendChild(createEl("div", { className: "list-row-title", text: getResourceDisplayName(r) }));
+
+    const orgName = getOrganizationNameById(r.organizationId);
+    const statusParts = [];
+    if (orgName) {
+      statusParts.push(orgName);
+    } else {
+      statusParts.push("Unassigned owner");
+    }
+
+    statusParts.push(normalizeString(r.status) || "published");
+
+    const submissionState = normalizeString(r.submissionState);
+    if (submissionState) {
+      statusParts.push(submissionState);
+    }
+
+    row.appendChild(createEl("div", {
+      className: "list-row-meta",
+      text: statusParts.join(" • ")
+    }));
     row.addEventListener("click", () => openResourceEditor(r.id, r));
     resourceList.appendChild(row);
   });
@@ -354,6 +463,7 @@ function renderResourceList(resources) {
 
 function openResourceEditor(docId, data) {
   editingResourceId = docId;
+  editingResourceData = data ? { ...data } : {};
   editorTitle.textContent = "Edit Resource";
   buildResourceForm(data || {});
   show(resourceEditor);
@@ -361,6 +471,7 @@ function openResourceEditor(docId, data) {
 
 addResourceBtn?.addEventListener("click", () => {
   editingResourceId = null;
+  editingResourceData = {};
   editorTitle.textContent = "Add New Resource";
   buildResourceForm({});
   show(resourceEditor);
@@ -368,6 +479,7 @@ addResourceBtn?.addEventListener("click", () => {
 
 cancelResourceBtn?.addEventListener("click", () => {
   hide(resourceEditor);
+  editingResourceData = null;
 });
 
 // ------------------------------------------------------
@@ -401,6 +513,49 @@ function buildFieldDate(fieldKey, label, value = "") {
 
   wrap.appendChild(lbl);
   wrap.appendChild(input);
+  return wrap;
+}
+
+function buildFieldSelect(fieldKey, label, value = "", options = [], placeholder = "Select an option") {
+  const wrap = createEl("div", {
+    className: "field-group",
+    attrs: { "data-field": fieldKey, "data-type": "select" }
+  });
+  const lbl = createEl("label", { className: "field-label", text: label });
+  const select = createEl("select");
+
+  const placeholderOption = createEl("option", {
+    text: placeholder,
+    attrs: { value: "" }
+  });
+  select.appendChild(placeholderOption);
+
+  options.forEach(option => {
+    const opt = createEl("option", {
+      text: option.label,
+      attrs: { value: option.value }
+    });
+    if (normalizeString(value) === option.value) {
+      opt.selected = true;
+    }
+    select.appendChild(opt);
+  });
+
+  if (!normalizeString(value)) {
+    select.value = "";
+  }
+
+  wrap.appendChild(lbl);
+  wrap.appendChild(select);
+  return wrap;
+}
+
+function buildReadOnlyMetaField(label, value) {
+  const wrap = createEl("div", { className: "field-group field-meta-group" });
+  const lbl = createEl("div", { className: "field-label", text: label });
+  const body = createEl("div", { className: "field-meta-value", text: normalizeString(value) || "-" });
+  wrap.appendChild(lbl);
+  wrap.appendChild(body);
   return wrap;
 }
 
@@ -631,7 +786,44 @@ function buildResourceForm(data) {
   quillEditors.clear();
   clearChildren(resourceForm);
 
+  const organizationOptions = organizationMeta
+    .map(org => ({
+      value: org.id,
+      label: getOrganizationDisplayName(org)
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
   resourceForm.appendChild(buildFieldText("Organization", "Organization", data.Organization || "", true));
+  resourceForm.appendChild(buildFieldSelect(
+    "organizationId",
+    "Owning Organization",
+    data.organizationId || "",
+    organizationOptions,
+    organizationOptions.length ? "Select organization owner" : "No organizations available"
+  ));
+  resourceForm.appendChild(buildFieldSelect(
+    "status",
+    "Publication Status",
+    data.status || "published",
+    [
+      { value: "published", label: "Published" },
+      { value: "draft", label: "Draft" },
+      { value: "archived", label: "Archived" }
+    ],
+    "Select status"
+  ));
+  resourceForm.appendChild(buildFieldSelect(
+    "submissionState",
+    "Submission State",
+    data.submissionState || "approved",
+    [
+      { value: "approved", label: "Approved" },
+      { value: "pending", label: "Pending Review" },
+      { value: "rejected", label: "Rejected" },
+      { value: "cancelled", label: "Cancelled" }
+    ],
+    "Select submission state"
+  ));
   resourceForm.appendChild(buildFieldRichText(
     "Description",
     "Description",
@@ -673,6 +865,12 @@ function buildResourceForm(data) {
 
   resourceForm.appendChild(buildFieldText("Title", "Title", data.Title || "", false));
   resourceForm.appendChild(buildFieldText("OrganizationName", "OrganizationName", data.OrganizationName || "", false));
+
+  if (editingResourceId) {
+    resourceForm.appendChild(buildReadOnlyMetaField("Created", formatTimestampValue(data.createdAt)));
+    resourceForm.appendChild(buildReadOnlyMetaField("Last Submitted", formatTimestampValue(data.lastSubmittedAt)));
+    resourceForm.appendChild(buildReadOnlyMetaField("Last Approved", formatTimestampValue(data.lastApprovedAt)));
+  }
 }
 
 function collectResourcePayload() {
@@ -737,8 +935,8 @@ function collectResourcePayload() {
       continue;
     }
 
-    const input = g.querySelector("input, textarea");
-    payload[field] = input ? input.value : "";
+    const input = g.querySelector("input, textarea, select");
+    payload[field] = input ? normalizeString(input.value) : "";
   }
 
   payload.Website = "";
@@ -755,6 +953,37 @@ saveResourceBtn?.addEventListener("click", async () => {
   }
 
   const payload = collectResourcePayload();
+  const actor = getCurrentActorMetadata();
+  const isNew = !editingResourceId;
+
+  payload.status = normalizeString(payload.status) || "published";
+  payload.submissionState = normalizeString(payload.submissionState) || "approved";
+  payload.updatedAt = serverTimestamp();
+  payload.updatedByUid = actor.uid;
+  payload.updatedByEmail = actor.email;
+
+  if (payload.organizationId && !getOrganizationNameById(payload.organizationId)) {
+    alert("Selected owning organization no longer exists. Reload the page and try again.");
+    return;
+  }
+
+  if (isNew) {
+    payload.createdAt = serverTimestamp();
+    payload.createdByUid = actor.uid;
+    payload.createdByEmail = actor.email;
+    payload.lastSubmittedAt = serverTimestamp();
+    payload.lastSubmittedBy = actor.uid;
+  }
+
+  if (!editingResourceData?.lastSubmittedAt) {
+    payload.lastSubmittedAt = payload.lastSubmittedAt || serverTimestamp();
+    payload.lastSubmittedBy = actor.uid;
+  }
+
+  if (payload.status === "published" && payload.submissionState === "approved" && !editingResourceData?.lastApprovedAt) {
+    payload.lastApprovedAt = serverTimestamp();
+    payload.lastApprovedBy = actor.uid;
+  }
 
   try {
     if (editingResourceId) {
@@ -781,6 +1010,159 @@ deleteResourceBtn?.addEventListener("click", async () => {
   } catch (err) {
     console.error("Error deleting resource:", err);
     alert("Error deleting resource. See console for details.");
+  }
+});
+
+// ------------------------------------------------------
+// ORGANIZATIONS (CRUD)
+// ------------------------------------------------------
+async function loadOrganizations() {
+  if (!organizationList) return;
+
+  hide(organizationEditor);
+  editingOrganizationId = null;
+  organizationList.textContent = "Loading...";
+  organizationMeta = [];
+
+  try {
+    const snap = await getDocs(collection(db, "organizations"));
+    const organizations = [];
+
+    snap.forEach(ds => {
+      const data = ds.data() || {};
+      organizations.push({
+        id: ds.id,
+        name: normalizeString(data.name),
+        status: normalizeString(data.status) || "active",
+        primaryEmail: normalizeString(data.primaryEmail),
+        phone: normalizeString(data.phone),
+        website: normalizeString(data.website),
+        notes: normalizeString(data.notes),
+        createdAt: data.createdAt || null,
+        updatedAt: data.updatedAt || null
+      });
+    });
+
+    organizations.sort((a, b) => getOrganizationDisplayName(a).localeCompare(getOrganizationDisplayName(b)));
+    organizationMeta = organizations;
+    renderOrganizationList(organizations);
+  } catch (err) {
+    console.error("Error loading organizations:", err);
+    organizationList.textContent = "Error loading organizations.";
+  }
+}
+
+function renderOrganizationList(orgs) {
+  clearChildren(organizationList);
+
+  if (!orgs.length) {
+    organizationList.textContent = "No organizations defined.";
+    return;
+  }
+
+  orgs.forEach(org => {
+    const row = createEl("div", { className: "list-row list-row-stacked" });
+    row.appendChild(createEl("div", { className: "list-row-title", text: getOrganizationDisplayName(org) }));
+    row.appendChild(createEl("div", { className: "list-row-meta", text: getOrganizationSummary(org) }));
+    row.addEventListener("click", () => openOrganizationEditor(org));
+    organizationList.appendChild(row);
+  });
+}
+
+function openOrganizationEditor(org) {
+  editingOrganizationId = org?.id || null;
+  organizationEditorTitle.textContent = editingOrganizationId ? "Edit Organization" : "Add Organization";
+
+  organizationNameInput.value = normalizeString(org?.name);
+  organizationStatusInput.value = normalizeString(org?.status) || "active";
+  organizationPrimaryEmailInput.value = normalizeString(org?.primaryEmail);
+  organizationPhoneInput.value = normalizeString(org?.phone);
+  organizationWebsiteInput.value = normalizeString(org?.website);
+  organizationNotesInput.value = normalizeString(org?.notes);
+
+  show(organizationEditor);
+}
+
+function collectOrganizationPayload() {
+  return {
+    name: normalizeString(organizationNameInput.value),
+    status: normalizeString(organizationStatusInput.value) || "active",
+    primaryEmail: normalizeString(organizationPrimaryEmailInput.value),
+    phone: normalizeString(organizationPhoneInput.value),
+    website: normalizeString(organizationWebsiteInput.value),
+    notes: normalizeString(organizationNotesInput.value)
+  };
+}
+
+addOrganizationBtn?.addEventListener("click", () => {
+  openOrganizationEditor(null);
+});
+
+cancelOrganizationBtn?.addEventListener("click", () => {
+  hide(organizationEditor);
+  editingOrganizationId = null;
+});
+
+saveOrganizationBtn?.addEventListener("click", async () => {
+  const payload = collectOrganizationPayload();
+  if (!payload.name) {
+    alert("Organization name is required.");
+    return;
+  }
+
+  const actor = getCurrentActorMetadata();
+  const duplicate = organizationMeta.find(org =>
+    org.id !== editingOrganizationId &&
+    normalizeString(org.name).toLowerCase() === payload.name.toLowerCase()
+  );
+
+  if (duplicate) {
+    alert(`An organization named "${duplicate.name}" already exists.`);
+    return;
+  }
+
+  payload.updatedAt = serverTimestamp();
+  payload.updatedBy = actor.uid;
+  payload.updatedByEmail = actor.email;
+
+  try {
+    if (editingOrganizationId) {
+      await updateDoc(doc(db, "organizations", editingOrganizationId), payload);
+    } else {
+      payload.createdAt = serverTimestamp();
+      payload.createdBy = actor.uid;
+      payload.createdByEmail = actor.email;
+      await addDoc(collection(db, "organizations"), payload);
+    }
+
+    hide(organizationEditor);
+    await loadOrganizations();
+    await loadResources();
+  } catch (err) {
+    console.error("Error saving organization:", err);
+    alert("Error saving organization. See console for details.");
+  }
+});
+
+deleteOrganizationBtn?.addEventListener("click", async () => {
+  if (!editingOrganizationId) return;
+
+  const attachedResources = resourceMeta.filter(resource => normalizeString(resource.organizationId) === editingOrganizationId);
+  if (attachedResources.length > 0) {
+    alert(`Cannot delete this organization while ${attachedResources.length} resource(s) still reference it.`);
+    return;
+  }
+
+  if (!confirm("Delete this organization?")) return;
+
+  try {
+    await deleteDoc(doc(db, "organizations", editingOrganizationId));
+    hide(organizationEditor);
+    await loadOrganizations();
+    await loadResources();
+  } catch (err) {
+    console.error("Error deleting organization:", err);
+    alert("Error deleting organization. See console for details.");
   }
 });
 

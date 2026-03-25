@@ -70,6 +70,7 @@
         <div class="nav">
             <button class="nav-btn" data-panel="resources">Edit Resources</button>
             <button class="nav-btn" data-panel="categories">Edit Categories</button>
+            <button class="nav-btn" data-panel="organizations">Edit Organizations</button>
         </div>
 
         <!-- RESOURCES PANEL -->
@@ -127,6 +128,66 @@
                             <button id="save-category-btn">Save Category</button>
                             <button id="delete-category-btn">Delete Category</button>
                             <button id="cancel-category-btn">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ORGANIZATIONS PANEL -->
+        <div id="panel-organizations" class="panel hidden">
+
+            <div class="panel-header">
+                <h3>Organizations</h3>
+                <button id="add-organization-btn">+ Add Organization</button>
+            </div>
+
+            <div class="admin-split">
+                <div class="admin-list" id="organization-list"></div>
+
+                <div class="admin-editor">
+                    <div id="organization-editor" class="editor hidden">
+                        <h3 id="organization-editor-title">Edit Organization</h3>
+
+                        <div class="field-group">
+                            <label class="field-label" for="organization-name-input">Organization Name</label>
+                            <input id="organization-name-input" placeholder="Organization Name" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="organization-status-input">Status</label>
+                            <select id="organization-status-input">
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                                <option value="archived">Archived</option>
+                            </select>
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="organization-primary-email-input">Primary Email</label>
+                            <input id="organization-primary-email-input" type="email" placeholder="Primary Email" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="organization-phone-input">Phone</label>
+                            <input id="organization-phone-input" placeholder="Phone" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="organization-website-input">Website</label>
+                            <input id="organization-website-input" placeholder="https://example.org" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="organization-notes-input">Internal Notes</label>
+                            <textarea id="organization-notes-input" placeholder="Notes about ownership or account setup"></textarea>
+                        </div>
+
+                        <div class="editor-actions">
+                            <button id="save-organization-btn">Save Organization</button>
+                            <button id="delete-organization-btn">Delete Organization</button>
+                            <button id="cancel-organization-btn">Cancel</button>
                         </div>
                     </div>
                 </div>

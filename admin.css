@@ -214,6 +214,7 @@ body {
 }
 
 .editor input,
+.editor select,
 .editor textarea {
   width: 100%;
   padding: 8px;
@@ -224,6 +225,49 @@ body {
 }
 
 .editor textarea { min-height: 60px; resize: vertical; }
+
+.list-row-stacked {
+  display: grid;
+  gap: 4px;
+}
+
+.list-row-title {
+  font-weight: 600;
+  color: #111827;
+}
+
+.list-row-meta {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.field-meta-group {
+  padding: 10px 12px;
+  border: 1px dashed #cbd5f5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.field-meta-value {
+  font-size: 13px;
+  color: #334155;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.editor-actions button {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
 
 .field-list-group {
   display: grid;
