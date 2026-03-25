@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Organization Portal - Community Resource Finder</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&display=swap"
+        rel="stylesheet"
+    />
+
+    <link
+        href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css"
+        rel="stylesheet"
+    />
+    <link rel="stylesheet" href="admin.css" />
+    <style>
+        .org-note {
+            margin: 12px 0 0;
+            color: #475569;
+            font-size: 14px;
+        }
+
+        .org-status-banner {
+            margin-top: 18px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1e3a8a;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="login-screen" class="screen">
+        <h1>Organization Login</h1>
+        <input id="email" type="email" placeholder="Email" />
+        <input id="password" type="password" placeholder="Password" />
+        <button id="loginBtn" type="button">Log In</button>
+        <div id="login-error"></div>
+        <p class="org-note">Use the email/password account set up for your organization.</p>
+    </div>
+
+    <div id="org-screen" class="screen hidden">
+        <div class="topbar">
+            <div class="topbar-left"></div>
+            <div class="topbar-center">
+                <a href="index.html" class="topbar-crf-link">
+                    <img src="crf-logo.png"
+                         alt="Community Resource Finder logo"
+                         class="logo-crf-small" />
+                    <div class="topbar-text">
+                        <span class="topbar-title">Community Resource Finder</span>
+                        <span class="topbar-subtitle">Organization Portal</span>
+                    </div>
+                </a>
+            </div>
+            <div class="topbar-right">
+                <button id="logoutBtn" type="button">Log Out</button>
+            </div>
+        </div>
+
+        <div id="org-status-banner" class="org-status-banner"></div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h3>Your Resources</h3>
+            </div>
+
+            <div class="admin-split">
+                <div class="admin-list" id="resource-list"></div>
+
+                <div class="admin-editor">
+                    <div id="resource-editor" class="editor hidden">
+                        <h3 id="editor-title">Submit Resource Update</h3>
+                        <div id="resource-form"></div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="submitter-notes">Notes for Library Staff</label>
+                            <textarea id="submitter-notes" placeholder="Explain what changed or anything staff should know"></textarea>
+                        </div>
+
+                        <div class="editor-actions">
+                            <button id="submit-request-btn" type="button">Submit for Review</button>
+                            <button id="cancel-resource-btn" type="button">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h3>Recent Requests</h3>
+            </div>
+            <div class="admin-list" id="request-list" style="width: 100%; max-height: none;"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.1/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+    <script type="module" src="org.js"></script>
+</body>
+</html>

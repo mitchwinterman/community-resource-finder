@@ -9,6 +9,7 @@ import {
   doc,
   getDocs,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   serverTimestamp,
@@ -17,8 +18,7 @@ import {
 import {
   signInWithEmailAndPassword,
   signOut,
-  onAuthStateChanged,
-  getIdTokenResult,
+  onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
   canonicalizeSubcategoryInput,
@@ -26,8 +26,16 @@ import {
 } from "./taxonomy-rules.js";
 import {
   normalizeWebsiteList,
-  normalizePhoneEntries
+  normalizePhoneEntries,
+  getPhoneDisplayText,
+  getPhoneHref,
+  getWebsiteDisplayText
 } from "./contact-fields.js";
+import {
+  getAccessProfile,
+  redirectToPortalForProfile,
+  redirectToUnifiedLogin
+} from "./auth-routing.js";
 
 // ------------------------------------------------------
 // CONFIG
@@ -48,6 +56,8 @@ const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const panelResources = document.getElementById("panel-resources");
 const panelCategories = document.getElementById("panel-categories");
 const panelOrganizations = document.getElementById("panel-organizations");
+const panelMemberships = document.getElementById("panel-memberships");
+const panelRequests = document.getElementById("panel-requests");
 
 // Resources UI
 const resourceList = document.getElementById("resource-list");
@@ -88,16 +98,45 @@ const saveOrganizationBtn = document.getElementById("save-organization-btn");
 const deleteOrganizationBtn = document.getElementById("delete-organization-btn");
 const cancelOrganizationBtn = document.getElementById("cancel-organization-btn");
 
+// Memberships UI
+const membershipList = document.getElementById("membership-list");
+const membershipEditor = document.getElementById("membership-editor");
+const membershipEditorTitle = document.getElementById("membership-editor-title");
+const membershipUidInput = document.getElementById("membership-uid-input");
+const membershipEmailInput = document.getElementById("membership-email-input");
+const membershipOrganizationSelect = document.getElementById("membership-organization-select");
+const membershipRoleSelect = document.getElementById("membership-role-select");
+const membershipStatusSelect = document.getElementById("membership-status-select");
+const membershipNotesInput = document.getElementById("membership-notes-input");
+const addMembershipBtn = document.getElementById("add-membership-btn");
+const saveMembershipBtn = document.getElementById("save-membership-btn");
+const deleteMembershipBtn = document.getElementById("delete-membership-btn");
+const cancelMembershipBtn = document.getElementById("cancel-membership-btn");
+
+// Requests UI
+const requestList = document.getElementById("request-list");
+const requestEditor = document.getElementById("request-editor");
+const requestEditorTitle = document.getElementById("request-editor-title");
+const requestSummary = document.getElementById("request-summary");
+const requestReviewNotes = document.getElementById("request-review-notes");
+const approveRequestBtn = document.getElementById("approve-request-btn");
+const rejectRequestBtn = document.getElementById("reject-request-btn");
+const closeRequestBtn = document.getElementById("close-request-btn");
+
 // ------------------------------------------------------
 // STATE
 // ------------------------------------------------------
 let editingResourceId = null;
 let editingCategoryId = null;
 let editingOrganizationId = null;
+let editingMembershipId = null;
+let editingRequestId = null;
 let editingResourceData = null;
 let categoryMeta = [];
 let organizationMeta = [];
 let resourceMeta = [];
+let membershipMeta = [];
+let requestMeta = [];
 let navInitialized = false;
 
 const quillEditors = new Map();
@@ -109,6 +148,50 @@ const quillToolbarOptions = [
 const quillFormats = ["bold", "italic", "underline", "list", "link"];
 const richTextAllowedTags = ["a", "br", "em", "li", "ol", "p", "strong", "u", "ul"];
 const richTextAllowedAttrs = ["href"];
+const orgEditableResourceFields = [
+  "Organization",
+  "Description",
+  "DescriptionDelta",
+  "Categories",
+  "Subcategories",
+  "Keywords",
+  "Websites",
+  "PhoneNumbers",
+  "Email",
+  "Address",
+  "City",
+  "Zip",
+  "Hours",
+  "Eligibility",
+  "Cost",
+  "Languages",
+  "Last Verified",
+  "Notes",
+  "NotesDelta",
+  "Title",
+  "OrganizationName"
+];
+const requestReviewFieldConfig = [
+  { field: "Organization", label: "Organization" },
+  { field: "Title", label: "Title" },
+  { field: "OrganizationName", label: "Organization Name" },
+  { field: "Description", label: "Description", type: "richtext" },
+  { field: "Categories", label: "Categories", type: "string-array" },
+  { field: "Subcategories", label: "Subcategories", type: "string-array" },
+  { field: "Keywords", label: "Keywords" },
+  { field: "Websites", label: "Websites", type: "website-array" },
+  { field: "PhoneNumbers", label: "Phone Numbers", type: "phone-array" },
+  { field: "Email", label: "Email", type: "email" },
+  { field: "Address", label: "Address" },
+  { field: "City", label: "City" },
+  { field: "Zip", label: "Zip" },
+  { field: "Hours", label: "Hours" },
+  { field: "Eligibility", label: "Eligibility" },
+  { field: "Cost", label: "Cost" },
+  { field: "Languages", label: "Languages" },
+  { field: "Last Verified", label: "Last Verified" },
+  { field: "Notes", label: "Notes", type: "richtext" }
+];
 
 // ------------------------------------------------------
 // Helpers
@@ -151,7 +234,7 @@ function getOrganizationSummary(org) {
   const pieces = [status];
   const email = normalizeString(org?.primaryEmail);
   if (email) pieces.push(email);
-  return pieces.join(" • ");
+  return pieces.join(" | ");
 }
 
 function getOrganizationNameById(organizationId) {
@@ -162,6 +245,96 @@ function getOrganizationNameById(organizationId) {
   return match ? getOrganizationDisplayName(match) : "";
 }
 
+function getMembershipSummary(membership) {
+  const orgName = getOrganizationNameById(membership.organizationId) || "(No organization)";
+  const role = normalizeString(membership.role) || "org_editor";
+  const status = normalizeString(membership.status) || "active";
+  return `${orgName} | ${role} | ${status}`;
+}
+
+function getRequestSummaryText(requestDoc) {
+  const orgName = getOrganizationNameById(requestDoc.organizationId) || "(Unknown organization)";
+  const resourceName = normalizeString(requestDoc.resourceName) || "(Unnamed resource)";
+  const status = normalizeString(requestDoc.status) || "pending";
+  return `${resourceName} | ${orgName} | ${status}`;
+}
+
+function populateMembershipOrganizationSelect(selectedValue = "") {
+  if (!membershipOrganizationSelect) return;
+
+  clearChildren(membershipOrganizationSelect);
+  membershipOrganizationSelect.appendChild(createEl("option", {
+    text: "Select organization",
+    attrs: { value: "" }
+  }));
+
+  organizationMeta
+    .slice()
+    .sort((a, b) => getOrganizationDisplayName(a).localeCompare(getOrganizationDisplayName(b)))
+    .forEach(org => {
+      const option = createEl("option", {
+        text: getOrganizationDisplayName(org),
+        attrs: { value: org.id }
+      });
+      if (selectedValue === org.id) {
+        option.selected = true;
+      }
+      membershipOrganizationSelect.appendChild(option);
+    });
+
+  if (!selectedValue) {
+    membershipOrganizationSelect.value = "";
+  }
+}
+
+function formatJsonBlock(value) {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+function sanitizeRequestedResourceData(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const payload = {};
+
+  orgEditableResourceFields.forEach(field => {
+    const rawValue = source[field];
+
+    if (field === "Description" || field === "Notes") {
+      payload[field] = sanitizeRichTextHtml(rawValue);
+      return;
+    }
+
+    if (field === "DescriptionDelta" || field === "NotesDelta") {
+      payload[field] = normalizeStoredDelta(rawValue);
+      return;
+    }
+
+    if (field === "Categories" || field === "Subcategories") {
+      payload[field] = normalizeStringArray(rawValue);
+      return;
+    }
+
+    if (field === "Websites") {
+      payload[field] = normalizeWebsiteList(rawValue);
+      return;
+    }
+
+    if (field === "PhoneNumbers") {
+      payload[field] = normalizePhoneEntries(rawValue);
+      return;
+    }
+
+    payload[field] = normalizeString(rawValue);
+  });
+
+  payload.Website = "";
+  payload.Phone = "";
+  return payload;
+}
+
 function createEl(tag, opts = {}) {
   const el = document.createElement(tag);
   if (opts.className) el.className = opts.className;
@@ -170,6 +343,247 @@ function createEl(tag, opts = {}) {
     for (const [k, v] of Object.entries(opts.attrs)) el.setAttribute(k, v);
   }
   return el;
+}
+
+function appendSafeHtml(el, html) {
+  el.innerHTML = sanitizeRichTextHtml(html);
+}
+
+function normalizeRequestComparableValue(value) {
+  if (Array.isArray(value)) {
+    return JSON.stringify(value);
+  }
+
+  if (value && typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return normalizeString(value);
+}
+
+function getRequestChangeKind(currentValue, proposedValue) {
+  const currentComparable = normalizeRequestComparableValue(currentValue);
+  const proposedComparable = normalizeRequestComparableValue(proposedValue);
+
+  if (!currentComparable && proposedComparable) return "added";
+  if (currentComparable && !proposedComparable) return "removed";
+  return "changed";
+}
+
+function buildRequestMetaBlock(requestDoc) {
+  const block = createEl("div", { className: "request-block" });
+  block.appendChild(createEl("h4", { text: "Request Summary" }));
+
+  const metaList = createEl("div", { className: "request-meta-list" });
+  const rows = [
+    ["Resource", normalizeString(requestDoc.resourceName) || "(Unnamed resource)"],
+    ["Organization", getOrganizationNameById(requestDoc.organizationId) || requestDoc.organizationId || "(Unknown organization)"],
+    ["Status", normalizeString(requestDoc.status) || "pending"],
+    ["Submitted by", normalizeString(requestDoc.submittedByEmail) || normalizeString(requestDoc.submittedByUid) || "(Unknown user)"],
+    ["Submitted at", formatTimestampValue(requestDoc.createdAt)],
+    ["Submitter notes", normalizeString(requestDoc.submitterNotes) || "(None)"]
+  ];
+
+  rows.forEach(([label, value]) => {
+    const row = createEl("div", { className: "request-meta-row" });
+    row.appendChild(createEl("strong", { text: label }));
+    row.appendChild(createEl("span", { text: value }));
+    metaList.appendChild(row);
+  });
+
+  block.appendChild(metaList);
+  return block;
+}
+
+function buildEmptyRequestValue() {
+  return createEl("div", {
+    className: "request-value empty",
+    text: "(blank)"
+  });
+}
+
+function buildRequestStringList(items) {
+  if (!items.length) {
+    return buildEmptyRequestValue();
+  }
+
+  const wrapper = createEl("div", { className: "request-value" });
+  const list = createEl("ul");
+  items.forEach(item => {
+    list.appendChild(createEl("li", { text: item }));
+  });
+  wrapper.appendChild(list);
+  return wrapper;
+}
+
+function buildRequestWebsiteList(items) {
+  if (!items.length) {
+    return buildEmptyRequestValue();
+  }
+
+  const wrapper = createEl("div", { className: "request-value" });
+  const list = createEl("ul");
+  items.forEach(item => {
+    const li = createEl("li");
+    const href = normalizeString(item);
+    const label = getWebsiteDisplayText(href) || href;
+
+    if (/^(https?:|mailto:)/i.test(href)) {
+      const anchor = createEl("a", {
+        text: label,
+        attrs: { href, target: "_blank", rel: "noopener noreferrer" }
+      });
+      li.appendChild(anchor);
+    } else {
+      li.textContent = label;
+    }
+
+    list.appendChild(li);
+  });
+  wrapper.appendChild(list);
+  return wrapper;
+}
+
+function buildRequestPhoneList(items) {
+  if (!items.length) {
+    return buildEmptyRequestValue();
+  }
+
+  const wrapper = createEl("div", { className: "request-value" });
+  const list = createEl("ul");
+  items.forEach(item => {
+    const li = createEl("li");
+    const display = getPhoneDisplayText(item);
+    const href = getPhoneHref(item);
+
+    if (href) {
+      li.appendChild(createEl("a", { text: display, attrs: { href } }));
+    } else {
+      li.textContent = display || "(blank)";
+    }
+
+    list.appendChild(li);
+  });
+  wrapper.appendChild(list);
+  return wrapper;
+}
+
+function buildRequestValue(fieldConfig, value) {
+  const fieldType = fieldConfig?.type || "text";
+
+  if (fieldType === "richtext") {
+    const html = sanitizeRichTextHtml(value);
+    if (!html) return buildEmptyRequestValue();
+
+    const wrapper = createEl("div", { className: "request-value" });
+    appendSafeHtml(wrapper, html);
+    return wrapper;
+  }
+
+  if (fieldType === "string-array") {
+    return buildRequestStringList(normalizeStringArray(value));
+  }
+
+  if (fieldType === "website-array") {
+    return buildRequestWebsiteList(normalizeWebsiteList(value));
+  }
+
+  if (fieldType === "phone-array") {
+    return buildRequestPhoneList(normalizePhoneEntries(value));
+  }
+
+  const normalized = normalizeString(value);
+  if (!normalized) return buildEmptyRequestValue();
+
+  const wrapper = createEl("div", { className: "request-value" });
+  if (fieldType === "email") {
+    wrapper.appendChild(createEl("a", {
+      text: normalized,
+      attrs: { href: `mailto:${normalized}` }
+    }));
+    return wrapper;
+  }
+
+  wrapper.textContent = normalized;
+  return wrapper;
+}
+
+function buildRequestDiffCard(fieldConfig, currentValue, proposedValue) {
+  const changeKind = getRequestChangeKind(currentValue, proposedValue);
+  const card = createEl("div", { className: `request-diff-card ${changeKind}` });
+  card.appendChild(createEl("h5", { text: fieldConfig.label }));
+
+  const badge = createEl("span", {
+    className: `request-change-badge ${changeKind}`,
+    text: changeKind === "added" ? "Added" : changeKind === "removed" ? "Removed" : "Changed"
+  });
+  card.appendChild(badge);
+
+  const columns = createEl("div", { className: "request-diff-columns" });
+
+  const beforeColumn = createEl("div", { className: "request-diff-column before" });
+  beforeColumn.appendChild(createEl("h6", { text: "Current" }));
+  beforeColumn.appendChild(buildRequestValue(fieldConfig, currentValue));
+
+  const afterColumn = createEl("div", { className: "request-diff-column after" });
+  afterColumn.appendChild(createEl("h6", { text: "Requested" }));
+  afterColumn.appendChild(buildRequestValue(fieldConfig, proposedValue));
+
+  columns.appendChild(beforeColumn);
+  columns.appendChild(afterColumn);
+  card.appendChild(columns);
+  return card;
+}
+
+function valuesMatchForReview(fieldConfig, currentValue, proposedValue) {
+  const currentComparable = normalizeRequestComparableValue(
+    fieldConfig?.type === "string-array" ? normalizeStringArray(currentValue)
+      : fieldConfig?.type === "website-array" ? normalizeWebsiteList(currentValue)
+      : fieldConfig?.type === "phone-array" ? normalizePhoneEntries(currentValue)
+      : fieldConfig?.type === "richtext" ? sanitizeRichTextHtml(currentValue)
+      : normalizeString(currentValue)
+  );
+  const proposedComparable = normalizeRequestComparableValue(
+    fieldConfig?.type === "string-array" ? normalizeStringArray(proposedValue)
+      : fieldConfig?.type === "website-array" ? normalizeWebsiteList(proposedValue)
+      : fieldConfig?.type === "phone-array" ? normalizePhoneEntries(proposedValue)
+      : fieldConfig?.type === "richtext" ? sanitizeRichTextHtml(proposedValue)
+      : normalizeString(proposedValue)
+  );
+
+  return currentComparable === proposedComparable;
+}
+
+function buildRequestDiffList(currentResource, proposedData) {
+  const wrapper = createEl("div", { className: "request-block" });
+  wrapper.appendChild(createEl("h4", { text: "Requested Changes" }));
+
+  const list = createEl("div", { className: "request-diff-list" });
+  const currentEditable = sanitizeRequestedResourceData(currentResource || {});
+  const proposedEditable = sanitizeRequestedResourceData(proposedData || {});
+
+  let changedCount = 0;
+  requestReviewFieldConfig.forEach(fieldConfig => {
+    const currentValue = currentEditable[fieldConfig.field];
+    const proposedValue = proposedEditable[fieldConfig.field];
+    if (valuesMatchForReview(fieldConfig, currentValue, proposedValue)) return;
+
+    changedCount += 1;
+    list.appendChild(buildRequestDiffCard(fieldConfig, currentValue, proposedValue));
+  });
+
+  if (!changedCount) {
+    const emptyState = createEl("div", { className: "request-diff-card" });
+    emptyState.appendChild(createEl("h5", { text: "No changed fields detected" }));
+    emptyState.appendChild(createEl("div", {
+      className: "request-value empty",
+      text: "The submitted request matches the current live values for all reviewable fields."
+    }));
+    list.appendChild(emptyState);
+  }
+
+  wrapper.appendChild(list);
+  return wrapper;
 }
 
 function getQuillCtor() {
@@ -255,18 +669,6 @@ function exportQuillContents(quill) {
   };
 }
 
-async function userHasAdminClaim(user) {
-  if (!user) return false;
-
-  try {
-    const tokenResult = await getIdTokenResult(user, true);
-    return tokenResult?.claims?.admin === true;
-  } catch (err) {
-    console.error("Error reading admin custom claim:", err);
-    return false;
-  }
-}
-
 function toDateInputValue(v) {
   const s = normalizeString(v);
   if (!s) return "";
@@ -328,18 +730,18 @@ logoutBtn?.addEventListener("click", async () => {
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    show(loginScreen);
-    hide(adminScreen);
-    loginError.textContent = "";
+    redirectToUnifiedLogin();
     return;
   }
 
-  const isAdmin = await userHasAdminClaim(user);
-  if (!isAdmin) {
-    show(loginScreen);
-    hide(adminScreen);
-    loginError.textContent = `Signed in as ${user.email || "(no email)"} but this account does not have the required admin claim.`;
+  const profile = await getAccessProfile(user);
+  if (!profile.isAdmin) {
+    if (redirectToPortalForProfile(profile)) {
+      return;
+    }
+
     await signOut(auth);
+    redirectToUnifiedLogin();
     return;
   }
 
@@ -351,6 +753,8 @@ onAuthStateChanged(auth, async (user) => {
   await loadOrganizations();
   await loadCategories();
   await loadResources();
+  await loadMemberships();
+  await loadReviewRequests();
 });
 
 // ------------------------------------------------------
@@ -378,6 +782,8 @@ function setActivePanel(panelName) {
   hide(panelResources);
   hide(panelCategories);
   hide(panelOrganizations);
+  hide(panelMemberships);
+  hide(panelRequests);
 
   if (panelName === "categories") {
     show(panelCategories);
@@ -386,6 +792,16 @@ function setActivePanel(panelName) {
 
   if (panelName === "organizations") {
     show(panelOrganizations);
+    return;
+  }
+
+  if (panelName === "memberships") {
+    show(panelMemberships);
+    return;
+  }
+
+  if (panelName === "requests") {
+    show(panelRequests);
     return;
   }
 
@@ -454,7 +870,7 @@ function renderResourceList(resources) {
 
     row.appendChild(createEl("div", {
       className: "list-row-meta",
-      text: statusParts.join(" • ")
+      text: statusParts.join(" | ")
     }));
     row.addEventListener("click", () => openResourceEditor(r.id, r));
     resourceList.appendChild(row);
@@ -1045,6 +1461,7 @@ async function loadOrganizations() {
 
     organizations.sort((a, b) => getOrganizationDisplayName(a).localeCompare(getOrganizationDisplayName(b)));
     organizationMeta = organizations;
+    populateMembershipOrganizationSelect();
     renderOrganizationList(organizations);
   } catch (err) {
     console.error("Error loading organizations:", err);
@@ -1138,6 +1555,8 @@ saveOrganizationBtn?.addEventListener("click", async () => {
     hide(organizationEditor);
     await loadOrganizations();
     await loadResources();
+    await loadMemberships();
+    await loadReviewRequests();
   } catch (err) {
     console.error("Error saving organization:", err);
     alert("Error saving organization. See console for details.");
@@ -1160,10 +1579,297 @@ deleteOrganizationBtn?.addEventListener("click", async () => {
     hide(organizationEditor);
     await loadOrganizations();
     await loadResources();
+    await loadMemberships();
+    await loadReviewRequests();
   } catch (err) {
     console.error("Error deleting organization:", err);
     alert("Error deleting organization. See console for details.");
   }
+});
+
+// ------------------------------------------------------
+// MEMBERSHIPS (CRUD)
+// ------------------------------------------------------
+async function loadMemberships() {
+  if (!membershipList) return;
+
+  hide(membershipEditor);
+  editingMembershipId = null;
+  membershipList.textContent = "Loading...";
+  membershipMeta = [];
+
+  try {
+    const snap = await getDocs(collection(db, "organization_members"));
+    const memberships = [];
+
+    snap.forEach(ds => {
+      const data = ds.data() || {};
+      memberships.push({
+        id: ds.id,
+        uid: normalizeString(data.uid || ds.id),
+        email: normalizeString(data.email),
+        organizationId: normalizeString(data.organizationId),
+        role: normalizeString(data.role) || "org_editor",
+        status: normalizeString(data.status) || "active",
+        notes: normalizeString(data.notes)
+      });
+    });
+
+    memberships.sort((a, b) => normalizeString(a.email).localeCompare(normalizeString(b.email)));
+    membershipMeta = memberships;
+    renderMembershipList(memberships);
+  } catch (err) {
+    console.error("Error loading memberships:", err);
+    membershipList.textContent = "Error loading organization access.";
+  }
+}
+
+function renderMembershipList(memberships) {
+  clearChildren(membershipList);
+
+  if (!memberships.length) {
+    membershipList.textContent = "No organization access records defined.";
+    return;
+  }
+
+  memberships.forEach(membership => {
+    const row = createEl("div", { className: "list-row list-row-stacked" });
+    row.appendChild(createEl("div", {
+      className: "list-row-title",
+      text: normalizeString(membership.email) || membership.uid || "(Unnamed membership)"
+    }));
+    row.appendChild(createEl("div", {
+      className: "list-row-meta",
+      text: getMembershipSummary(membership)
+    }));
+    row.addEventListener("click", () => openMembershipEditor(membership));
+    membershipList.appendChild(row);
+  });
+}
+
+function openMembershipEditor(membership) {
+  editingMembershipId = membership?.id || null;
+  membershipEditorTitle.textContent = editingMembershipId ? "Edit Organization Access" : "Add Organization Access";
+
+  populateMembershipOrganizationSelect(normalizeString(membership?.organizationId));
+  membershipUidInput.disabled = Boolean(editingMembershipId);
+  membershipUidInput.value = normalizeString(membership?.uid);
+  membershipEmailInput.value = normalizeString(membership?.email);
+  membershipRoleSelect.value = normalizeString(membership?.role) || "org_editor";
+  membershipStatusSelect.value = normalizeString(membership?.status) || "active";
+  membershipNotesInput.value = normalizeString(membership?.notes);
+
+  show(membershipEditor);
+}
+
+function collectMembershipPayload() {
+  return {
+    uid: normalizeString(membershipUidInput.value),
+    email: normalizeString(membershipEmailInput.value),
+    organizationId: normalizeString(membershipOrganizationSelect.value),
+    role: normalizeString(membershipRoleSelect.value) || "org_editor",
+    status: normalizeString(membershipStatusSelect.value) || "active",
+    notes: normalizeString(membershipNotesInput.value)
+  };
+}
+
+addMembershipBtn?.addEventListener("click", () => {
+  openMembershipEditor(null);
+});
+
+cancelMembershipBtn?.addEventListener("click", () => {
+  hide(membershipEditor);
+  editingMembershipId = null;
+  membershipUidInput.disabled = false;
+});
+
+saveMembershipBtn?.addEventListener("click", async () => {
+  const payload = collectMembershipPayload();
+  if (!payload.uid) {
+    alert("Firebase Auth UID is required.");
+    return;
+  }
+  if (!payload.organizationId) {
+    alert("Organization is required.");
+    return;
+  }
+  if (!editingMembershipId && membershipMeta.some(item => item.id === payload.uid)) {
+    alert("A membership record for that UID already exists.");
+    return;
+  }
+
+  const actor = getCurrentActorMetadata();
+  payload.updatedAt = serverTimestamp();
+  payload.updatedBy = actor.uid;
+  payload.updatedByEmail = actor.email;
+
+  try {
+    if (editingMembershipId) {
+      await updateDoc(doc(db, "organization_members", editingMembershipId), payload);
+    } else {
+      payload.createdAt = serverTimestamp();
+      payload.createdBy = actor.uid;
+      payload.createdByEmail = actor.email;
+      await setDoc(doc(db, "organization_members", payload.uid), payload);
+    }
+
+    hide(membershipEditor);
+    await loadMemberships();
+  } catch (err) {
+    console.error("Error saving membership:", err);
+    alert("Error saving organization access. See console for details.");
+  }
+});
+
+deleteMembershipBtn?.addEventListener("click", async () => {
+  if (!editingMembershipId) return;
+  if (!confirm("Delete this organization access record?")) return;
+
+  try {
+    await deleteDoc(doc(db, "organization_members", editingMembershipId));
+    hide(membershipEditor);
+    await loadMemberships();
+  } catch (err) {
+    console.error("Error deleting membership:", err);
+    alert("Error deleting organization access. See console for details.");
+  }
+});
+
+// ------------------------------------------------------
+// REVIEW REQUESTS
+// ------------------------------------------------------
+async function loadReviewRequests() {
+  if (!requestList) return;
+
+  hide(requestEditor);
+  editingRequestId = null;
+  requestList.textContent = "Loading...";
+  requestMeta = [];
+
+  try {
+    const snap = await getDocs(collection(db, "resource_change_requests"));
+    const requests = [];
+
+    snap.forEach(ds => {
+      const data = ds.data() || {};
+      requests.push({
+        id: ds.id,
+        ...data
+      });
+    });
+
+    requests.sort((a, b) => {
+      const statusRank = value => normalizeString(value) === "pending" ? 0 : 1;
+      const rankDelta = statusRank(a.status) - statusRank(b.status);
+      if (rankDelta !== 0) return rankDelta;
+
+      const aTime = a.updatedAt?.seconds || a.createdAt?.seconds || 0;
+      const bTime = b.updatedAt?.seconds || b.createdAt?.seconds || 0;
+      return bTime - aTime;
+    });
+
+    requestMeta = requests;
+    renderRequestList(requests);
+  } catch (err) {
+    console.error("Error loading requests:", err);
+    requestList.textContent = "Error loading requests.";
+  }
+}
+
+function renderRequestList(requests) {
+  clearChildren(requestList);
+
+  if (!requests.length) {
+    requestList.textContent = "No change requests found.";
+    return;
+  }
+
+  requests.forEach(requestDoc => {
+    const row = createEl("div", { className: "list-row list-row-stacked" });
+    row.appendChild(createEl("div", {
+      className: "list-row-title",
+      text: normalizeString(requestDoc.resourceName) || "(Unnamed request)"
+    }));
+    row.appendChild(createEl("div", {
+      className: "list-row-meta",
+      text: getRequestSummaryText(requestDoc)
+    }));
+    row.addEventListener("click", () => openRequestEditor(requestDoc));
+    requestList.appendChild(row);
+  });
+}
+
+function openRequestEditor(requestDoc) {
+  editingRequestId = requestDoc?.id || null;
+  requestEditorTitle.textContent = "Review Request";
+  requestReviewNotes.value = normalizeString(requestDoc?.reviewNotes);
+  clearChildren(requestSummary);
+
+  const currentResource = resourceMeta.find(resource => resource.id === requestDoc.resourceId);
+  requestSummary.appendChild(buildRequestMetaBlock(requestDoc));
+  requestSummary.appendChild(buildRequestDiffList(currentResource, requestDoc.proposedData));
+
+  show(requestEditor);
+}
+
+closeRequestBtn?.addEventListener("click", () => {
+  hide(requestEditor);
+  editingRequestId = null;
+});
+
+async function reviewRequest(nextStatus) {
+  if (!editingRequestId) return;
+
+  const requestDoc = requestMeta.find(item => item.id === editingRequestId);
+  if (!requestDoc) return;
+
+  const actor = getCurrentActorMetadata();
+  const reviewNotes = normalizeString(requestReviewNotes.value);
+
+  try {
+    if (nextStatus === "approved") {
+      const approvedProposedData = sanitizeRequestedResourceData(requestDoc.proposedData);
+      const resourcePayload = {
+        ...approvedProposedData,
+        organizationId: normalizeString(requestDoc.organizationId),
+        status: "published",
+        submissionState: "approved",
+        updatedAt: serverTimestamp(),
+        updatedByUid: actor.uid,
+        updatedByEmail: actor.email,
+        lastSubmittedAt: requestDoc.createdAt || serverTimestamp(),
+        lastSubmittedBy: normalizeString(requestDoc.submittedByUid),
+        lastApprovedAt: serverTimestamp(),
+        lastApprovedBy: actor.uid
+      };
+
+      await updateDoc(doc(db, "resources", requestDoc.resourceId), resourcePayload);
+    }
+
+    await updateDoc(doc(db, "resource_change_requests", editingRequestId), {
+      status: nextStatus,
+      reviewNotes,
+      reviewedAt: serverTimestamp(),
+      reviewedBy: actor.uid,
+      reviewedByEmail: actor.email,
+      updatedAt: serverTimestamp()
+    });
+
+    hide(requestEditor);
+    await loadResources();
+    await loadReviewRequests();
+  } catch (err) {
+    console.error("Error reviewing request:", err);
+    alert("Error updating change request. See console for details.");
+  }
+}
+
+approveRequestBtn?.addEventListener("click", async () => {
+  await reviewRequest("approved");
+});
+
+rejectRequestBtn?.addEventListener("click", async () => {
+  await reviewRequest("rejected");
 });
 
 // ------------------------------------------------------

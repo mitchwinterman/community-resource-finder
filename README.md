@@ -33,9 +33,14 @@ Top-level files:
 - `about.html`: about page
 - `help.html`: help page
 - `contact.html`: contact and resource suggestion form
+- `login.html`: unified login entry point that routes by role
+- `login.js`: role-aware login and portal routing logic
 - `admin.html`: admin login and editing interface
-- `admin.js`: admin authentication and CRUD operations for resources, categories, and organizations
+- `admin.js`: admin authentication and CRUD operations for resources, categories, organizations, org access, and request review
 - `admin.css`: admin styling
+- `auth-routing.js`: shared role detection and redirect logic for admin and org portals
+- `org.html`: organization login and submission portal
+- `org.js`: organization-side request submission logic
 - `ownership-backfill.html`: one-time Phase 2A ownership/status backfill page
 - `ownership-backfill.js`: one-time Phase 2A resource ownership backfill logic
 - `taxonomy-rules.js`: shared taxonomy normalization rules used by the admin category editor
@@ -71,15 +76,29 @@ The admin app lives in `admin.html` + `admin.js`.
 
 It:
 
-1. Shows a login screen.
-2. Signs users in with Firebase Authentication using email and password.
-3. Checks the signed-in user's Firebase custom claims for `admin: true`.
-4. Loads organizations, categories, and resources from Firestore.
-5. Allows creating, editing, and deleting:
+1. Requires a signed-in session from `login.html`.
+2. Redirects non-admin users away automatically.
+3. Loads organizations, categories, resources, memberships, and requests from Firestore.
+4. Allows creating, editing, and deleting:
    - resources
    - categories
    - subcategories inside category documents
    - organizations
+   - organization access records
+5. Reviews `resource_change_requests` and approves or rejects them.
+
+### Organization Portal
+
+The organization portal lives in `org.html` + `org.js`.
+
+It:
+
+1. Requires a signed-in session from `login.html`.
+2. Redirects admins or unauthorized users away automatically.
+3. Reads the user's `organization_members/{uid}` document.
+4. Loads only resources owned by that organization.
+5. Lets the user submit updates as `resource_change_requests`.
+6. Never writes directly to live `resources`.
 
 ## Firebase Configuration
 
@@ -94,11 +113,13 @@ The Firebase web config is committed directly in the repository. That is normal 
 
 ## Data Model
 
-The repo currently uses three active Firestore collections:
+The repo currently uses five active Firestore collections:
 
 - `resources`
 - `categories`
 - `organizations`
+- `organization_members`
+- `resource_change_requests`
 
 ### `resources` Collection
 
@@ -207,13 +228,88 @@ Each document in `organizations` is expected to look roughly like this:
 
 Notes:
 
-- this collection is admin-only in the current Firestore rules
+- library admins can write this collection; org users can read only their own organization doc
 - Phase 2 uses it as the owner lookup for `resources.organizationId`
-- future org-user login and membership work will build on this collection
+- org-user login and membership work build on this collection
+
+### `organization_members` Collection
+
+Each document in `organization_members` is keyed by Firebase Auth UID and is expected to look roughly like this:
+
+```json
+{
+  "uid": "<firebase-auth-uid>",
+  "email": "user@example.org",
+  "organizationId": "<organizations doc id>",
+  "role": "org_editor",
+  "status": "active",
+  "notes": "Internal setup notes",
+  "createdAt": "<timestamp>",
+  "createdBy": "<uid>",
+  "createdByEmail": "admin@example.org",
+  "updatedAt": "<timestamp>",
+  "updatedBy": "<uid>",
+  "updatedByEmail": "admin@example.org"
+}
+```
+
+Notes:
+
+- the document id should match the Firebase Auth `uid`
+- this is what grants an org user access to `org.html`
+- the current implementation assumes one organization per org-user account
+
+### `resource_change_requests` Collection
+
+Each document in `resource_change_requests` is expected to look roughly like this:
+
+```json
+{
+  "resourceId": "<resources doc id>",
+  "resourceName": "Example Organization",
+  "organizationId": "<organizations doc id>",
+  "submittedByUid": "<firebase-auth-uid>",
+  "submittedByEmail": "user@example.org",
+  "status": "pending",
+  "proposedData": {
+    "Description": "<p>Updated description</p>",
+    "PhoneNumbers": [{ "label": "Main", "number": "(775) 555-1234" }]
+  },
+  "submitterNotes": "Updated hours and hotline number.",
+  "reviewNotes": "",
+  "createdAt": "<timestamp>",
+  "updatedAt": "<timestamp>",
+  "reviewedAt": null,
+  "reviewedBy": null,
+  "reviewedByEmail": null
+}
+```
+
+Notes:
+
+- org users create these docs from `org.html`
+- library admins review them in `admin.html`
+- approving a request copies `proposedData` into the live `resources` doc
 
 ## Login Details
 
-### Admin Login URL
+### Unified Login URL
+
+Use:
+
+- `login.html`
+
+Examples:
+
+- local dev: `http://localhost:8000/login.html`
+- hosted site: `https://<your-site>/login.html`
+
+Users should start here. The app detects role and routes automatically:
+
+- library admins -> `admin.html`
+- organization users with active `organization_members` access -> `org.html`
+
+### Admin Portal URL
 
 Use:
 
@@ -223,6 +319,19 @@ Examples:
 
 - local dev: `http://localhost:8000/admin.html`
 - hosted site: `https://<your-site>/admin.html`
+
+### Organization Portal URL
+
+Use:
+
+- `org.html`
+
+Examples:
+
+- local dev: `http://localhost:8000/org.html`
+- hosted site: `https://<your-site>/org.html`
+
+If a signed-in user opens the wrong portal directly, the page should redirect them to the correct one.
 
 ### Admin Account
 
@@ -301,7 +410,9 @@ After starting a local server, these pages should be available:
 - `/about.html`
 - `/help.html`
 - `/contact.html`
+- `/login.html`
 - `/admin.html`
+- `/org.html`
 - `/ownership-backfill.html`
 
 ## Public Site Behavior
@@ -456,6 +567,17 @@ The Organizations panel allows library admins to:
 
 These organization records are the source of truth for `resources.organizationId`.
 
+### Organization Access Management
+
+The Organization Access panel allows library admins to:
+
+- create `organization_members` docs keyed by Firebase Auth UID
+- connect an authenticated org user to exactly one organization
+- activate or deactivate org access
+- manage role labels such as `org_editor` and `org_admin`
+
+Phase 2B still assumes library staff create the Firebase Auth user outside the app, then enter the UID here.
+
 ### Category Management
 
 The Categories panel allows staff to:
@@ -487,6 +609,27 @@ Recommended order:
 4. run the backfill
 5. spot-check resources in `admin.html`
 
+### Request Review
+
+The Review Requests panel allows library admins to:
+
+- view submitted `resource_change_requests`
+- compare proposed data against the live resource
+- approve a request and publish the proposed data to the live `resources` doc
+- reject a request with review notes
+
+### Organization Portal Workflow
+
+The organization portal in `org.html` allows org users to:
+
+- sign in with email and password
+- view only resources owned by their organization
+- edit resource details in a submission form
+- submit changes for review
+- view recent request history
+
+Org users do not directly edit live `resources`.
+
 ## Deployment
 
 This repo is structured like a static site deployment.
@@ -513,10 +656,11 @@ Before pushing to production, verify:
 4. the admin user exists in Firebase Auth
 5. the admin user has the Firebase custom claim `admin: true`
 6. `resources`, `categories`, and `organizations` collections exist and contain expected data
-7. contact email targets are still correct
-8. branding assets and footer text are current
-9. the site works on mobile and desktop browsers
-10. the admin password is known and stored in an approved password manager
+7. `organization_members` and `resource_change_requests` are configured if the org portal is in use
+8. contact email targets are still correct
+9. branding assets and footer text are current
+10. the site works on mobile and desktop browsers
+11. the admin password is known and stored in an approved password manager
 
 ## Admin Claim Setup
 

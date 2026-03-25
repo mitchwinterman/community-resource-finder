@@ -10,6 +10,20 @@ service cloud.firestore {
       return signedIn() && request.auth.token.admin == true;
     }
 
+    function hasActiveMembership() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organization_members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/organization_members/$(request.auth.uid)).data.status == "active";
+    }
+
+    function memberOrganizationId() {
+      return get(/databases/$(database)/documents/organization_members/$(request.auth.uid)).data.organizationId;
+    }
+
+    function belongsToOrganization(organizationId) {
+      return hasActiveMembership() && memberOrganizationId() == organizationId;
+    }
+
     match /resources/{resourceId} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
@@ -21,15 +35,22 @@ service cloud.firestore {
     }
 
     match /organizations/{organizationId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read: if isAdmin() || belongsToOrganization(organizationId);
+      allow create, update, delete: if isAdmin();
     }
 
-    match /organization_members/{memberId} {
-      allow read, create, update, delete: if isAdmin();
+    match /organization_members/{userId} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow create, update, delete: if isAdmin();
     }
 
     match /resource_change_requests/{requestId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read: if isAdmin() || (hasActiveMembership() && resource.data.organizationId == memberOrganizationId());
+      allow create: if hasActiveMembership()
+        && request.resource.data.organizationId == memberOrganizationId()
+        && request.resource.data.submittedByUid == request.auth.uid
+        && request.resource.data.status == "pending";
+      allow update, delete: if isAdmin();
     }
 
     match /{document=**} {

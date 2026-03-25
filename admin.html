@@ -71,6 +71,8 @@
             <button class="nav-btn" data-panel="resources">Edit Resources</button>
             <button class="nav-btn" data-panel="categories">Edit Categories</button>
             <button class="nav-btn" data-panel="organizations">Edit Organizations</button>
+            <button class="nav-btn" data-panel="memberships">Edit Org Access</button>
+            <button class="nav-btn" data-panel="requests">Review Requests</button>
         </div>
 
         <!-- RESOURCES PANEL -->
@@ -188,6 +190,98 @@
                             <button id="save-organization-btn">Save Organization</button>
                             <button id="delete-organization-btn">Delete Organization</button>
                             <button id="cancel-organization-btn">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- MEMBERSHIPS PANEL -->
+        <div id="panel-memberships" class="panel hidden">
+
+            <div class="panel-header">
+                <h3>Organization Access</h3>
+                <button id="add-membership-btn">+ Add Org User</button>
+            </div>
+
+            <div class="admin-split">
+                <div class="admin-list" id="membership-list"></div>
+
+                <div class="admin-editor">
+                    <div id="membership-editor" class="editor hidden">
+                        <h3 id="membership-editor-title">Edit Organization Access</h3>
+
+                        <div class="field-group">
+                            <label class="field-label" for="membership-uid-input">Firebase Auth UID</label>
+                            <input id="membership-uid-input" placeholder="Firebase Auth UID" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="membership-email-input">User Email</label>
+                            <input id="membership-email-input" type="email" placeholder="user@example.org" />
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="membership-organization-select">Organization</label>
+                            <select id="membership-organization-select"></select>
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="membership-role-select">Role</label>
+                            <select id="membership-role-select">
+                                <option value="org_editor">Org Editor</option>
+                                <option value="org_admin">Org Admin</option>
+                            </select>
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="membership-status-select">Status</label>
+                            <select id="membership-status-select">
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                        </div>
+
+                        <div class="field-group">
+                            <label class="field-label" for="membership-notes-input">Internal Notes</label>
+                            <textarea id="membership-notes-input" placeholder="Manual account setup notes"></textarea>
+                        </div>
+
+                        <div class="editor-actions">
+                            <button id="save-membership-btn">Save Access</button>
+                            <button id="delete-membership-btn">Delete Access</button>
+                            <button id="cancel-membership-btn">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- REQUESTS PANEL -->
+        <div id="panel-requests" class="panel hidden">
+
+            <div class="panel-header">
+                <h3>Pending Requests</h3>
+            </div>
+
+            <div class="admin-split">
+                <div class="admin-list" id="request-list"></div>
+
+                <div class="admin-editor">
+                    <div id="request-editor" class="editor hidden">
+                        <h3 id="request-editor-title">Review Request</h3>
+                        <div id="request-summary" class="request-summary"></div>
+                        <div class="field-group">
+                            <label class="field-label" for="request-review-notes">Review Notes</label>
+                            <textarea id="request-review-notes" placeholder="Optional notes for approval or rejection"></textarea>
+                        </div>
+
+                        <div class="editor-actions">
+                            <button id="approve-request-btn">Approve</button>
+                            <button id="reject-request-btn">Reject</button>
+                            <button id="close-request-btn">Close</button>
                         </div>
                     </div>
                 </div>
