@@ -165,8 +165,6 @@ Each document in `resources` is expected to look roughly like this:
   "Keywords": "housing, shelter, pantry",
   "UpdatedBy": "Staff Name",
   "Languages": "English, Spanish",
-  "Title": "",
-  "OrganizationName": ""
 }
 ```
 
@@ -534,8 +532,6 @@ The current resource editor includes:
 - `Last Verified`
 - `UpdatedBy`
 - `Notes`
-- `Title`
-- `OrganizationName`
 
 The admin now uses Quill for `Description` and `Notes`, and saves both:
 

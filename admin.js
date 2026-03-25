@@ -56,7 +56,6 @@ const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const panelResources = document.getElementById("panel-resources");
 const panelCategories = document.getElementById("panel-categories");
 const panelOrganizations = document.getElementById("panel-organizations");
-const panelMemberships = document.getElementById("panel-memberships");
 const panelRequests = document.getElementById("panel-requests");
 
 // Resources UI
@@ -102,9 +101,9 @@ const cancelOrganizationBtn = document.getElementById("cancel-organization-btn")
 const membershipList = document.getElementById("membership-list");
 const membershipEditor = document.getElementById("membership-editor");
 const membershipEditorTitle = document.getElementById("membership-editor-title");
+const membershipSectionHelper = document.getElementById("membership-section-helper");
 const membershipUidInput = document.getElementById("membership-uid-input");
 const membershipEmailInput = document.getElementById("membership-email-input");
-const membershipOrganizationSelect = document.getElementById("membership-organization-select");
 const membershipRoleSelect = document.getElementById("membership-role-select");
 const membershipStatusSelect = document.getElementById("membership-status-select");
 const membershipNotesInput = document.getElementById("membership-notes-input");
@@ -118,9 +117,19 @@ const requestList = document.getElementById("request-list");
 const requestEditor = document.getElementById("request-editor");
 const requestEditorTitle = document.getElementById("request-editor-title");
 const requestSummary = document.getElementById("request-summary");
+const requestEditForm = document.getElementById("request-edit-form");
 const requestReviewNotes = document.getElementById("request-review-notes");
+const requestFilterPendingBtn = document.getElementById("request-filter-pending");
+const requestFilterApprovedBtn = document.getElementById("request-filter-approved");
+const requestFilterRejectedBtn = document.getElementById("request-filter-rejected");
+const requestSelectionCount = document.getElementById("request-selection-count");
+const bulkApproveRequestsBtn = document.getElementById("bulk-approve-requests-btn");
+const bulkRejectRequestsBtn = document.getElementById("bulk-reject-requests-btn");
+const bulkDeleteRequestsBtn = document.getElementById("bulk-delete-requests-btn");
 const approveRequestBtn = document.getElementById("approve-request-btn");
 const rejectRequestBtn = document.getElementById("reject-request-btn");
+const editRequestBtn = document.getElementById("edit-request-btn");
+const deleteRequestBtn = document.getElementById("delete-request-btn");
 const closeRequestBtn = document.getElementById("close-request-btn");
 
 // ------------------------------------------------------
@@ -138,6 +147,9 @@ let resourceMeta = [];
 let membershipMeta = [];
 let requestMeta = [];
 let navInitialized = false;
+let activeRequestFilter = "pending";
+let selectedRequestIds = new Set();
+let requestEditMode = false;
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -167,14 +179,10 @@ const orgEditableResourceFields = [
   "Languages",
   "Last Verified",
   "Notes",
-  "NotesDelta",
-  "Title",
-  "OrganizationName"
+  "NotesDelta"
 ];
 const requestReviewFieldConfig = [
   { field: "Organization", label: "Organization" },
-  { field: "Title", label: "Title" },
-  { field: "OrganizationName", label: "Organization Name" },
   { field: "Description", label: "Description", type: "richtext" },
   { field: "Categories", label: "Categories", type: "string-array" },
   { field: "Subcategories", label: "Subcategories", type: "string-array" },
@@ -255,36 +263,92 @@ function getMembershipSummary(membership) {
 function getRequestSummaryText(requestDoc) {
   const orgName = getOrganizationNameById(requestDoc.organizationId) || "(Unknown organization)";
   const resourceName = normalizeString(requestDoc.resourceName) || "(Unnamed resource)";
-  const status = normalizeString(requestDoc.status) || "pending";
+  const status = getRequestStatusLabel(requestDoc.status);
   return `${resourceName} | ${orgName} | ${status}`;
 }
 
-function populateMembershipOrganizationSelect(selectedValue = "") {
-  if (!membershipOrganizationSelect) return;
+function normalizeRequestStatus(value) {
+  const status = normalizeString(value).toLowerCase();
+  if (status === "approved" || status === "rejected") return status;
+  return "pending";
+}
 
-  clearChildren(membershipOrganizationSelect);
-  membershipOrganizationSelect.appendChild(createEl("option", {
-    text: "Select organization",
-    attrs: { value: "" }
-  }));
+function getRequestStatusLabel(value) {
+  const status = normalizeRequestStatus(value);
+  if (status === "approved") return "accepted";
+  if (status === "rejected") return "rejected";
+  return "pending";
+}
 
-  organizationMeta
-    .slice()
-    .sort((a, b) => getOrganizationDisplayName(a).localeCompare(getOrganizationDisplayName(b)))
-    .forEach(org => {
-      const option = createEl("option", {
-        text: getOrganizationDisplayName(org),
-        attrs: { value: org.id }
-      });
-      if (selectedValue === org.id) {
-        option.selected = true;
-      }
-      membershipOrganizationSelect.appendChild(option);
-    });
+function getFilteredRequests() {
+  return requestMeta.filter(requestDoc => normalizeRequestStatus(requestDoc.status) === activeRequestFilter);
+}
 
-  if (!selectedValue) {
-    membershipOrganizationSelect.value = "";
+function updateRequestSelectionUi() {
+  if (!requestSelectionCount) return;
+
+  const count = selectedRequestIds.size;
+  requestSelectionCount.textContent = `${count} selected`;
+
+  const disabled = count === 0;
+  if (bulkApproveRequestsBtn) bulkApproveRequestsBtn.disabled = disabled;
+  if (bulkRejectRequestsBtn) bulkRejectRequestsBtn.disabled = disabled;
+  if (bulkDeleteRequestsBtn) bulkDeleteRequestsBtn.disabled = disabled;
+}
+
+function updateRequestFilterUi() {
+  const tabConfig = [
+    { btn: requestFilterPendingBtn, status: "pending", label: "Pending" },
+    { btn: requestFilterApprovedBtn, status: "approved", label: "Accepted" },
+    { btn: requestFilterRejectedBtn, status: "rejected", label: "Rejected" }
+  ];
+
+  tabConfig.forEach(({ btn, status, label }) => {
+    if (!btn) return;
+    const count = requestMeta.filter(requestDoc => normalizeRequestStatus(requestDoc.status) === status).length;
+    btn.textContent = `${label} (${count})`;
+    btn.classList.toggle("active", activeRequestFilter === status);
+  });
+}
+
+function setActiveRequestFilter(nextFilter) {
+  activeRequestFilter = normalizeRequestStatus(nextFilter);
+  selectedRequestIds = new Set(
+    Array.from(selectedRequestIds).filter(id =>
+      normalizeRequestStatus(requestMeta.find(item => item.id === id)?.status) === activeRequestFilter
+    )
+  );
+  const openRequest = requestMeta.find(item => item.id === editingRequestId);
+  if (openRequest && normalizeRequestStatus(openRequest.status) !== activeRequestFilter) {
+    hide(requestEditor);
+    editingRequestId = null;
   }
+  updateRequestFilterUi();
+  updateRequestSelectionUi();
+  renderRequestList(getFilteredRequests());
+}
+
+function getMembershipsForOrganization(organizationId) {
+  const targetId = normalizeString(organizationId);
+  if (!targetId) return [];
+  return membershipMeta.filter(item => normalizeString(item.organizationId) === targetId);
+}
+
+function refreshOrganizationMembershipSection() {
+  if (!membershipList || !membershipSectionHelper || !addMembershipBtn) return;
+
+  if (!editingOrganizationId) {
+    hide(membershipEditor);
+    editingMembershipId = null;
+    addMembershipBtn.disabled = true;
+    membershipSectionHelper.textContent = "Save this organization first, then add authorized editors.";
+    membershipList.textContent = "";
+    return;
+  }
+
+  addMembershipBtn.disabled = false;
+  membershipSectionHelper.textContent = "Users in this list can sign in and submit updates for this organization.";
+  renderMembershipList(getMembershipsForOrganization(editingOrganizationId));
 }
 
 function formatJsonBlock(value) {
@@ -378,7 +442,7 @@ function buildRequestMetaBlock(requestDoc) {
   const rows = [
     ["Resource", normalizeString(requestDoc.resourceName) || "(Unnamed resource)"],
     ["Organization", getOrganizationNameById(requestDoc.organizationId) || requestDoc.organizationId || "(Unknown organization)"],
-    ["Status", normalizeString(requestDoc.status) || "pending"],
+    ["Status", getRequestStatusLabel(requestDoc.status)],
     ["Submitted by", normalizeString(requestDoc.submittedByEmail) || normalizeString(requestDoc.submittedByUid) || "(Unknown user)"],
     ["Submitted at", formatTimestampValue(requestDoc.createdAt)],
     ["Submitter notes", normalizeString(requestDoc.submitterNotes) || "(None)"]
@@ -586,6 +650,125 @@ function buildRequestDiffList(currentResource, proposedData) {
   return wrapper;
 }
 
+function buildRequestEditFieldset(data) {
+  quillEditors.clear();
+  clearChildren(requestEditForm);
+
+  requestEditForm.appendChild(createEl("h4", { text: "Edit Proposed Changes" }));
+  requestEditForm.appendChild(buildFieldText("Organization", "Organization", data.Organization || "", true));
+  requestEditForm.appendChild(buildFieldRichText(
+    "Description",
+    "Description",
+    data.Description || "",
+    data.DescriptionDelta || null
+  ));
+  requestEditForm.appendChild(buildNestedCategorySelector(data.Categories, data.Subcategories));
+  requestEditForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
+  requestEditForm.appendChild(buildFieldStringList(
+    "Websites",
+    "Websites",
+    normalizeWebsiteList(Array.isArray(data.Websites) ? data.Websites : data.Website),
+    "https://example.org"
+  ));
+  requestEditForm.appendChild(buildFieldPhoneList(
+    "PhoneNumbers",
+    "Phone Numbers",
+    normalizePhoneEntries(Array.isArray(data.PhoneNumbers) ? data.PhoneNumbers : data.Phone)
+  ));
+  requestEditForm.appendChild(buildFieldText("Email", "Email", data.Email || "", false));
+  requestEditForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
+  requestEditForm.appendChild(buildFieldText("City", "City", data.City || "", false));
+  requestEditForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
+  requestEditForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
+  requestEditForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
+  requestEditForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
+  requestEditForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
+  requestEditForm.appendChild(buildFieldDate("Last Verified", "Last Verified", data["Last Verified"] || ""));
+  requestEditForm.appendChild(buildFieldRichText(
+    "Notes",
+    "Notes",
+    data.Notes || "",
+    data.NotesDelta || null
+  ));
+}
+
+function collectRequestEditPayload() {
+  const payload = {};
+  const groups = Array.from(requestEditForm.querySelectorAll(".field-group"));
+
+  groups.forEach(group => {
+    const field = group.dataset.field;
+    const type = group.dataset.type;
+
+    if (field === "__nested_categories__" && type === "nestedcats") {
+      const selectedCats = [];
+      const selectedSubs = [];
+      Array.from(group.querySelectorAll(".cat-block")).forEach(block => {
+        const catCb = block.querySelector(".cat-row input[type='checkbox']");
+        if (catCb?.checked) {
+          selectedCats.push(catCb.value);
+          Array.from(block.querySelectorAll(".cat-sub-row input[type='checkbox']")).forEach(subCb => {
+            if (subCb.checked) selectedSubs.push(subCb.value);
+          });
+        }
+      });
+      payload.Categories = selectedCats;
+      payload.Subcategories = selectedSubs;
+      return;
+    }
+
+    if (type === "richtext") {
+      const quill = quillEditors.get(field);
+      const { html, delta } = quill ? exportQuillContents(quill) : { html: "", delta: null };
+      payload[field] = html;
+      payload[`${field}Delta`] = delta;
+      return;
+    }
+
+    if (type === "stringlist") {
+      payload[field] = Array.from(group.querySelectorAll(".field-list-row input"))
+        .map(input => normalizeString(input.value))
+        .filter(Boolean);
+      return;
+    }
+
+    if (type === "phoneentries") {
+      payload[field] = Array.from(group.querySelectorAll(".field-phone-row"))
+        .map(row => {
+          const inputs = row.querySelectorAll("input");
+          const label = normalizeString(inputs[0]?.value);
+          const number = normalizeString(inputs[1]?.value);
+          if (!number) return null;
+          return label ? { label, number } : { number };
+        })
+        .filter(Boolean);
+      return;
+    }
+
+    const input = group.querySelector("input, textarea, select");
+    payload[field] = input ? normalizeString(input.value) : "";
+  });
+
+  payload.Website = "";
+  payload.Phone = "";
+  return sanitizeRequestedResourceData(payload);
+}
+
+function setRequestEditMode(enabled, requestDoc = null) {
+  requestEditMode = Boolean(enabled);
+  editRequestBtn.textContent = requestEditMode ? "Cancel Edit" : "Edit";
+
+  if (!requestEditMode || !requestDoc) {
+    hide(requestEditForm);
+    clearChildren(requestEditForm);
+    return;
+  }
+
+  const proposed = sanitizeRequestedResourceData(requestDoc.proposedData || {});
+  buildRequestEditFieldset(proposed);
+  show(requestEditForm);
+}
+
 function getQuillCtor() {
   if (typeof window.Quill !== "function") {
     throw new Error("Quill failed to load.");
@@ -782,7 +965,6 @@ function setActivePanel(panelName) {
   hide(panelResources);
   hide(panelCategories);
   hide(panelOrganizations);
-  hide(panelMemberships);
   hide(panelRequests);
 
   if (panelName === "categories") {
@@ -792,11 +974,6 @@ function setActivePanel(panelName) {
 
   if (panelName === "organizations") {
     show(panelOrganizations);
-    return;
-  }
-
-  if (panelName === "memberships") {
-    show(panelMemberships);
     return;
   }
 
@@ -1279,9 +1456,6 @@ function buildResourceForm(data) {
     data.NotesDelta || null
   ));
 
-  resourceForm.appendChild(buildFieldText("Title", "Title", data.Title || "", false));
-  resourceForm.appendChild(buildFieldText("OrganizationName", "OrganizationName", data.OrganizationName || "", false));
-
   if (editingResourceId) {
     resourceForm.appendChild(buildReadOnlyMetaField("Created", formatTimestampValue(data.createdAt)));
     resourceForm.appendChild(buildReadOnlyMetaField("Last Submitted", formatTimestampValue(data.lastSubmittedAt)));
@@ -1461,8 +1635,8 @@ async function loadOrganizations() {
 
     organizations.sort((a, b) => getOrganizationDisplayName(a).localeCompare(getOrganizationDisplayName(b)));
     organizationMeta = organizations;
-    populateMembershipOrganizationSelect();
     renderOrganizationList(organizations);
+    refreshOrganizationMembershipSection();
   } catch (err) {
     console.error("Error loading organizations:", err);
     organizationList.textContent = "Error loading organizations.";
@@ -1497,6 +1671,10 @@ function openOrganizationEditor(org) {
   organizationWebsiteInput.value = normalizeString(org?.website);
   organizationNotesInput.value = normalizeString(org?.notes);
 
+  hide(membershipEditor);
+  editingMembershipId = null;
+  membershipUidInput.disabled = false;
+  refreshOrganizationMembershipSection();
   show(organizationEditor);
 }
 
@@ -1518,6 +1696,10 @@ addOrganizationBtn?.addEventListener("click", () => {
 cancelOrganizationBtn?.addEventListener("click", () => {
   hide(organizationEditor);
   editingOrganizationId = null;
+  hide(membershipEditor);
+  editingMembershipId = null;
+  membershipUidInput.disabled = false;
+  refreshOrganizationMembershipSection();
 });
 
 saveOrganizationBtn?.addEventListener("click", async () => {
@@ -1571,6 +1753,11 @@ deleteOrganizationBtn?.addEventListener("click", async () => {
     alert(`Cannot delete this organization while ${attachedResources.length} resource(s) still reference it.`);
     return;
   }
+  const attachedMemberships = membershipMeta.filter(item => normalizeString(item.organizationId) === editingOrganizationId);
+  if (attachedMemberships.length > 0) {
+    alert(`Cannot delete this organization while ${attachedMemberships.length} authorized editor record(s) still reference it.`);
+    return;
+  }
 
   if (!confirm("Delete this organization?")) return;
 
@@ -1595,7 +1782,7 @@ async function loadMemberships() {
 
   hide(membershipEditor);
   editingMembershipId = null;
-  membershipList.textContent = "Loading...";
+  membershipList.textContent = editingOrganizationId ? "Loading..." : "";
   membershipMeta = [];
 
   try {
@@ -1617,10 +1804,10 @@ async function loadMemberships() {
 
     memberships.sort((a, b) => normalizeString(a.email).localeCompare(normalizeString(b.email)));
     membershipMeta = memberships;
-    renderMembershipList(memberships);
+    refreshOrganizationMembershipSection();
   } catch (err) {
     console.error("Error loading memberships:", err);
-    membershipList.textContent = "Error loading organization access.";
+    membershipList.textContent = "Error loading organization editors.";
   }
 }
 
@@ -1628,7 +1815,7 @@ function renderMembershipList(memberships) {
   clearChildren(membershipList);
 
   if (!memberships.length) {
-    membershipList.textContent = "No organization access records defined.";
+    membershipList.textContent = "No authorized editors yet.";
     return;
   }
 
@@ -1648,10 +1835,13 @@ function renderMembershipList(memberships) {
 }
 
 function openMembershipEditor(membership) {
-  editingMembershipId = membership?.id || null;
-  membershipEditorTitle.textContent = editingMembershipId ? "Edit Organization Access" : "Add Organization Access";
+  if (!editingOrganizationId) {
+    alert("Save the organization first, then add authorized editors.");
+    return;
+  }
 
-  populateMembershipOrganizationSelect(normalizeString(membership?.organizationId));
+  editingMembershipId = membership?.id || null;
+  membershipEditorTitle.textContent = editingMembershipId ? "Edit Authorized Editor" : "Add Authorized Editor";
   membershipUidInput.disabled = Boolean(editingMembershipId);
   membershipUidInput.value = normalizeString(membership?.uid);
   membershipEmailInput.value = normalizeString(membership?.email);
@@ -1666,7 +1856,7 @@ function collectMembershipPayload() {
   return {
     uid: normalizeString(membershipUidInput.value),
     email: normalizeString(membershipEmailInput.value),
-    organizationId: normalizeString(membershipOrganizationSelect.value),
+    organizationId: normalizeString(editingOrganizationId),
     role: normalizeString(membershipRoleSelect.value) || "org_editor",
     status: normalizeString(membershipStatusSelect.value) || "active",
     notes: normalizeString(membershipNotesInput.value)
@@ -1685,12 +1875,12 @@ cancelMembershipBtn?.addEventListener("click", () => {
 
 saveMembershipBtn?.addEventListener("click", async () => {
   const payload = collectMembershipPayload();
-  if (!payload.uid) {
-    alert("Firebase Auth UID is required.");
+  if (!editingOrganizationId) {
+    alert("Save the organization first, then add authorized editors.");
     return;
   }
-  if (!payload.organizationId) {
-    alert("Organization is required.");
+  if (!payload.uid) {
+    alert("Firebase Auth UID is required.");
     return;
   }
   if (!editingMembershipId && membershipMeta.some(item => item.id === payload.uid)) {
@@ -1714,6 +1904,8 @@ saveMembershipBtn?.addEventListener("click", async () => {
     }
 
     hide(membershipEditor);
+    editingMembershipId = null;
+    membershipUidInput.disabled = false;
     await loadMemberships();
   } catch (err) {
     console.error("Error saving membership:", err);
@@ -1728,6 +1920,8 @@ deleteMembershipBtn?.addEventListener("click", async () => {
   try {
     await deleteDoc(doc(db, "organization_members", editingMembershipId));
     hide(membershipEditor);
+    editingMembershipId = null;
+    membershipUidInput.disabled = false;
     await loadMemberships();
   } catch (err) {
     console.error("Error deleting membership:", err);
@@ -1759,7 +1953,12 @@ async function loadReviewRequests() {
     });
 
     requests.sort((a, b) => {
-      const statusRank = value => normalizeString(value) === "pending" ? 0 : 1;
+      const statusRank = value => {
+        const status = normalizeRequestStatus(value);
+        if (status === "pending") return 0;
+        if (status === "approved") return 1;
+        return 2;
+      };
       const rankDelta = statusRank(a.status) - statusRank(b.status);
       if (rankDelta !== 0) return rankDelta;
 
@@ -1769,7 +1968,12 @@ async function loadReviewRequests() {
     });
 
     requestMeta = requests;
-    renderRequestList(requests);
+    selectedRequestIds = new Set(
+      Array.from(selectedRequestIds).filter(id => requests.some(requestDoc => requestDoc.id === id))
+    );
+    updateRequestFilterUi();
+    updateRequestSelectionUi();
+    renderRequestList(getFilteredRequests());
   } catch (err) {
     console.error("Error loading requests:", err);
     requestList.textContent = "Error loading requests.";
@@ -1780,20 +1984,49 @@ function renderRequestList(requests) {
   clearChildren(requestList);
 
   if (!requests.length) {
-    requestList.textContent = "No change requests found.";
+    requestList.textContent = `No ${activeRequestFilter} requests found.`;
     return;
   }
 
   requests.forEach(requestDoc => {
-    const row = createEl("div", { className: "list-row list-row-stacked" });
-    row.appendChild(createEl("div", {
+    const row = createEl("div", {
+      className: `list-row request-list-row${selectedRequestIds.has(requestDoc.id) ? " selected" : ""}`
+    });
+
+    const checkWrap = createEl("label", { className: "request-row-check" });
+    const checkbox = createEl("input", {
+      attrs: { type: "checkbox", "aria-label": `Select request for ${normalizeString(requestDoc.resourceName) || "resource"}` }
+    });
+    checkbox.checked = selectedRequestIds.has(requestDoc.id);
+    checkbox.addEventListener("click", event => {
+      event.stopPropagation();
+    });
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedRequestIds.add(requestDoc.id);
+      } else {
+        selectedRequestIds.delete(requestDoc.id);
+      }
+      updateRequestSelectionUi();
+      renderRequestList(getFilteredRequests());
+    });
+    checkWrap.appendChild(checkbox);
+    row.appendChild(checkWrap);
+
+    const content = createEl("div", { className: "request-row-content list-row-stacked" });
+    content.appendChild(createEl("div", {
       className: "list-row-title",
       text: normalizeString(requestDoc.resourceName) || "(Unnamed request)"
     }));
-    row.appendChild(createEl("div", {
+    content.appendChild(createEl("div", {
       className: "list-row-meta",
       text: getRequestSummaryText(requestDoc)
     }));
+    content.appendChild(createEl("span", {
+      className: `request-status-pill ${normalizeRequestStatus(requestDoc.status)}`,
+      text: getRequestStatusLabel(requestDoc.status)
+    }));
+    row.appendChild(content);
     row.addEventListener("click", () => openRequestEditor(requestDoc));
     requestList.appendChild(row);
   });
@@ -1804,6 +2037,7 @@ function openRequestEditor(requestDoc) {
   requestEditorTitle.textContent = "Review Request";
   requestReviewNotes.value = normalizeString(requestDoc?.reviewNotes);
   clearChildren(requestSummary);
+  setRequestEditMode(false);
 
   const currentResource = resourceMeta.find(resource => resource.id === requestDoc.resourceId);
   requestSummary.appendChild(buildRequestMetaBlock(requestDoc));
@@ -1815,7 +2049,43 @@ function openRequestEditor(requestDoc) {
 closeRequestBtn?.addEventListener("click", () => {
   hide(requestEditor);
   editingRequestId = null;
+  setRequestEditMode(false);
 });
+
+async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overrideProposedData = null) {
+  if (!requestDoc) return;
+
+  const actor = getCurrentActorMetadata();
+  const effectiveProposedData = sanitizeRequestedResourceData(overrideProposedData || requestDoc.proposedData);
+
+  if (nextStatus === "approved") {
+    const resourcePayload = {
+      ...effectiveProposedData,
+      organizationId: normalizeString(requestDoc.organizationId),
+      status: "published",
+      submissionState: "approved",
+      updatedAt: serverTimestamp(),
+      updatedByUid: actor.uid,
+      updatedByEmail: actor.email,
+      lastSubmittedAt: requestDoc.createdAt || serverTimestamp(),
+      lastSubmittedBy: normalizeString(requestDoc.submittedByUid),
+      lastApprovedAt: serverTimestamp(),
+      lastApprovedBy: actor.uid
+    };
+
+    await updateDoc(doc(db, "resources", requestDoc.resourceId), resourcePayload);
+  }
+
+  await updateDoc(doc(db, "resource_change_requests", requestDoc.id), {
+    status: nextStatus,
+    reviewNotes,
+    proposedData: effectiveProposedData,
+    reviewedAt: serverTimestamp(),
+    reviewedBy: actor.uid,
+    reviewedByEmail: actor.email,
+    updatedAt: serverTimestamp()
+  });
+}
 
 async function reviewRequest(nextStatus) {
   if (!editingRequestId) return;
@@ -1823,44 +2093,83 @@ async function reviewRequest(nextStatus) {
   const requestDoc = requestMeta.find(item => item.id === editingRequestId);
   if (!requestDoc) return;
 
-  const actor = getCurrentActorMetadata();
   const reviewNotes = normalizeString(requestReviewNotes.value);
 
   try {
-    if (nextStatus === "approved") {
-      const approvedProposedData = sanitizeRequestedResourceData(requestDoc.proposedData);
-      const resourcePayload = {
-        ...approvedProposedData,
-        organizationId: normalizeString(requestDoc.organizationId),
-        status: "published",
-        submissionState: "approved",
-        updatedAt: serverTimestamp(),
-        updatedByUid: actor.uid,
-        updatedByEmail: actor.email,
-        lastSubmittedAt: requestDoc.createdAt || serverTimestamp(),
-        lastSubmittedBy: normalizeString(requestDoc.submittedByUid),
-        lastApprovedAt: serverTimestamp(),
-        lastApprovedBy: actor.uid
-      };
-
-      await updateDoc(doc(db, "resources", requestDoc.resourceId), resourcePayload);
-    }
-
-    await updateDoc(doc(db, "resource_change_requests", editingRequestId), {
-      status: nextStatus,
-      reviewNotes,
-      reviewedAt: serverTimestamp(),
-      reviewedBy: actor.uid,
-      reviewedByEmail: actor.email,
-      updatedAt: serverTimestamp()
-    });
-
+    const editedProposedData = requestEditMode && nextStatus === "approved"
+      ? collectRequestEditPayload()
+      : null;
+    await applyReviewAction(requestDoc, nextStatus, reviewNotes, editedProposedData);
+    selectedRequestIds.delete(requestDoc.id);
     hide(requestEditor);
+    editingRequestId = null;
+    setRequestEditMode(false);
     await loadResources();
     await loadReviewRequests();
   } catch (err) {
     console.error("Error reviewing request:", err);
     alert("Error updating change request. See console for details.");
+  }
+}
+
+async function deleteSingleRequest() {
+  if (!editingRequestId) return;
+
+  const requestDoc = requestMeta.find(item => item.id === editingRequestId);
+  if (!requestDoc) return;
+  if (!confirm("Delete this review request?")) return;
+
+  try {
+    await deleteDoc(doc(db, "resource_change_requests", requestDoc.id));
+    selectedRequestIds.delete(requestDoc.id);
+    hide(requestEditor);
+    editingRequestId = null;
+    setRequestEditMode(false);
+    await loadReviewRequests();
+  } catch (err) {
+    console.error("Error deleting request:", err);
+    alert("Error deleting change request. See console for details.");
+  }
+}
+
+async function applyBulkRequestAction(action) {
+  const selectedIds = Array.from(selectedRequestIds);
+  if (!selectedIds.length) return;
+
+  const selectedRequests = requestMeta.filter(item => selectedIds.includes(item.id));
+  if (!selectedRequests.length) return;
+
+  const actionLabel = action === "approved" ? "approve"
+    : action === "rejected" ? "reject"
+    : "delete";
+  if (!confirm(`${actionLabel[0].toUpperCase()}${actionLabel.slice(1)} ${selectedRequests.length} selected request(s)?`)) {
+    return;
+  }
+
+  try {
+    if (action === "delete") {
+      await Promise.all(selectedRequests.map(requestDoc =>
+        deleteDoc(doc(db, "resource_change_requests", requestDoc.id))
+      ));
+    } else {
+      await Promise.all(selectedRequests.map(requestDoc =>
+        applyReviewAction(requestDoc, action, "")
+      ));
+      if (action === "approved") {
+        await loadResources();
+      }
+    }
+
+    selectedRequestIds.clear();
+    if (editingRequestId && selectedIds.includes(editingRequestId)) {
+      hide(requestEditor);
+      editingRequestId = null;
+      setRequestEditMode(false);
+    }
+    await loadReviewRequests();
+  } catch (err) {
+    console.error("Error applying bulk request action:", err);
+    alert("Error applying bulk request action. See console for details.");
   }
 }
 
@@ -1870,6 +2179,41 @@ approveRequestBtn?.addEventListener("click", async () => {
 
 rejectRequestBtn?.addEventListener("click", async () => {
   await reviewRequest("rejected");
+});
+
+deleteRequestBtn?.addEventListener("click", async () => {
+  await deleteSingleRequest();
+});
+
+editRequestBtn?.addEventListener("click", () => {
+  if (!editingRequestId) return;
+  const requestDoc = requestMeta.find(item => item.id === editingRequestId);
+  if (!requestDoc) return;
+  setRequestEditMode(!requestEditMode, requestDoc);
+});
+
+requestFilterPendingBtn?.addEventListener("click", () => {
+  setActiveRequestFilter("pending");
+});
+
+requestFilterApprovedBtn?.addEventListener("click", () => {
+  setActiveRequestFilter("approved");
+});
+
+requestFilterRejectedBtn?.addEventListener("click", () => {
+  setActiveRequestFilter("rejected");
+});
+
+bulkApproveRequestsBtn?.addEventListener("click", async () => {
+  await applyBulkRequestAction("approved");
+});
+
+bulkRejectRequestsBtn?.addEventListener("click", async () => {
+  await applyBulkRequestAction("rejected");
+});
+
+bulkDeleteRequestsBtn?.addEventListener("click", async () => {
+  await applyBulkRequestAction("delete");
 });
 
 // ------------------------------------------------------

@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Community Resource Finder</title>
 
-    <!-- Display font for titles -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -19,114 +18,116 @@
 <body>
     <div class="wrapper">
 
-        <!-- HEADER: CRF left, WCLS right -->
         <header class="app-header">
-            <!-- CRF pill (clickable to home) -->
             <a href="index.html" class="brand-home-link">
                 <div class="brand-home">
-                    <img src="crf-logo.png"
-                         alt="Community Resource Finder"
-                         class="logo-crf" />
+                    <img
+                        src="crf-logo.png"
+                        alt="Community Resource Finder"
+                        class="logo-crf"
+                    />
                     <div class="brand-text">
                         <h1 class="app-title">Community Resource Finder</h1>
                         <div class="subtitle">
-                            Browse, search, and filter resources from the Washoe County Library’s Community Resources Guide.
+                            Browse, search, and filter resources from the Washoe County Library's Community Resources Guide.
                         </div>
                     </div>
                 </div>
             </a>
 
-            <!-- (Optional future header nav; empty for now) -->
             <nav class="header-nav"></nav>
 
-            <!-- WCLS logo on the right -->
-            <a href="https://www.washoecountylibrary.us/index.php"
-               class="wcls-link"
-               target="_blank"
-               rel="noopener noreferrer">
-                <img src="wcls-logo.png"
-                     alt="Washoe County Library System"
-                     class="logo-wcls" />
-            </a>
+            <div class="header-side">
+                <a
+                    href="https://www.washoecountylibrary.us/index.php"
+                    class="wcls-link"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    <img
+                        src="wcls-logo.png"
+                        alt="Washoe County Library System"
+                        class="logo-wcls"
+                    />
+                </a>
+
+                <div class="header-quick-links" aria-label="Organization and public actions">
+                    <a href="login.html" class="header-action-btn">Organization Editor Login</a>
+                    <a href="contact.html#suggest" class="header-action-link">Suggest a Resource</a>
+                    <a
+                        href="mailto:mwinterman@washoecounty.gov?subject=Community%20Resource%20Finder%20Editor%20Access%20Request&body=Organization%20name%3A%0AContact%20name%3A%0AWork%20email%3A%0APhone%3A%0AResource%20listing%20name%20(if%20already%20listed)%3A%0AReason%20for%20request%3A%0A"
+                        class="header-action-link"
+                    >
+                        Request Editor Access
+                    </a>
+                </div>
+            </div>
         </header>
 
-        <!-- SEARCH + FILTERS -->
         <div class="search-row">
-
-            <!-- Search box -->
             <div class="search-box">
-                <input 
-                    type="text" 
-                    id="searchBox" 
+                <input
+                    type="text"
+                    id="searchBox"
                     placeholder="Search by name, service, keyword, or location..."
-                >
+                />
             </div>
 
-            <!-- Category dropdown -->
             <div>
                 <select id="categorySelect">
                     <option value="all">All categories</option>
                 </select>
             </div>
 
-            <!-- Subcategory dropdown -->
             <div>
                 <select id="subcategorySelect" disabled>
                     <option value="all">All subcategories</option>
                 </select>
             </div>
 
-            <!-- RESET BUTTON -->
             <div>
                 <button id="resetButton" class="reset-btn">Reset</button>
             </div>
-
         </div>
 
-        <!-- SPLIT VIEW: RESULTS + DETAILS -->
         <div class="content-split">
-
-            <!-- Results list -->
             <div class="results-panel">
                 <div id="resultCount" class="result-count"></div>
-                <div id="results">
-                    Loading…
-                </div>
+                <div id="results">Loading...</div>
             </div>
 
-            <!-- Details panel -->
             <div id="details" class="details-panel">
                 <div class="details-empty">
                     Select a resource<br />
                     <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
                 </div>
             </div>
-
         </div>
 
-        <!-- FOOTER -->
         <footer class="app-footer">
             <div class="footer-left">
-                © 2025 Washoe County Library System
+                &copy; 2025 Washoe County Library System
             </div>
             <div class="footer-right">
                 <a href="index.html">Home</a>
-                <span class="footer-separator">•</span>
+                <span class="footer-separator">&bull;</span>
                 <a href="about.html">About</a>
-                <span class="footer-separator">•</span>
+                <span class="footer-separator">&bull;</span>
                 <a href="help.html">Help</a>
-                <span class="footer-separator">•</span>
+                <span class="footer-separator">&bull;</span>
                 <a href="contact.html">Contact</a>
-                <span class="footer-separator">•</span>
+                <span class="footer-separator">&bull;</span>
                 <a href="contact.html#suggest">Suggest a Resource</a>
-                <span class="footer-separator">•</span>
+                <span class="footer-separator">&bull;</span>
+                <a href="login.html">Organization Login</a>
+                <span class="footer-separator">&bull;</span>
+                <a href="mailto:mwinterman@washoecounty.gov?subject=Community%20Resource%20Finder%20Editor%20Access%20Request">Request Editor Access</a>
+                <span class="footer-separator">&bull;</span>
                 <a href="admin.html" class="footer-admin-link">Admin</a>
             </div>
         </footer>
-
     </div>
 
-    <!-- Frontend app (module) -->
     <script type="module" src="app.js"></script>
 </body>
 </html>

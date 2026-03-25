@@ -76,9 +76,7 @@ const orgEditableResourceFields = [
   "Languages",
   "Last Verified",
   "Notes",
-  "NotesDelta",
-  "Title",
-  "OrganizationName"
+  "NotesDelta"
 ];
 
 function show(el) {
@@ -101,6 +99,19 @@ function normalizeString(value) {
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
   return value.map(item => normalizeString(item)).filter(Boolean);
+}
+
+function normalizeRequestStatus(value) {
+  const status = normalizeString(value).toLowerCase();
+  if (status === "approved" || status === "rejected") return status;
+  return "pending";
+}
+
+function formatRequestTimestamp(value) {
+  if (value?.toDate) {
+    return value.toDate().toLocaleString();
+  }
+  return "";
 }
 
 function createEl(tag, opts = {}) {
@@ -341,26 +352,53 @@ function renderResourceList(resources) {
 function renderRequestList(requests) {
   clearChildren(requestList);
 
-  if (!requests.length) {
-    requestList.textContent = "No requests submitted yet.";
-    return;
-  }
+  const sections = [
+    { status: "pending", label: "Pending" },
+    { status: "approved", label: "Approved" },
+    { status: "rejected", label: "Rejected" }
+  ];
 
-  requests.forEach(requestDoc => {
-    const row = createEl("div", { className: "list-row list-row-stacked" });
-    row.appendChild(createEl("div", {
-      className: "list-row-title",
-      text: normalizeString(requestDoc.resourceName) || "(Unnamed request)"
-    }));
-    row.appendChild(createEl("div", {
-      className: "list-row-meta",
-      text: [
-        normalizeString(requestDoc.status) || "pending",
-        normalizeString(requestDoc.submittedByEmail) || normalizeString(requestDoc.submittedByUid),
-        requestDoc.createdAt?.toDate ? requestDoc.createdAt.toDate().toLocaleString() : ""
-      ].filter(Boolean).join(" | ")
-    }));
-    requestList.appendChild(row);
+  sections.forEach(section => {
+    const sectionWrap = createEl("div", { className: "request-history-section" });
+    sectionWrap.appendChild(createEl("h4", { text: section.label }));
+
+    const sectionItems = requests.filter(requestDoc => normalizeRequestStatus(requestDoc.status) === section.status);
+    if (!sectionItems.length) {
+      sectionWrap.appendChild(createEl("div", {
+        className: "request-history-empty",
+        text: `No ${section.label.toLowerCase()} requests.`
+      }));
+      requestList.appendChild(sectionWrap);
+      return;
+    }
+
+    sectionItems.forEach(requestDoc => {
+      const row = createEl("div", { className: "list-row list-row-stacked" });
+      row.appendChild(createEl("div", {
+        className: "list-row-title",
+        text: normalizeString(requestDoc.resourceName) || "(Unnamed request)"
+      }));
+      row.appendChild(createEl("div", {
+        className: "list-row-meta",
+        text: [
+          section.label,
+          normalizeString(requestDoc.submittedByEmail) || normalizeString(requestDoc.submittedByUid),
+          formatRequestTimestamp(requestDoc.createdAt)
+        ].filter(Boolean).join(" | ")
+      }));
+
+      const reviewNotes = normalizeString(requestDoc.reviewNotes);
+      if (reviewNotes) {
+        row.appendChild(createEl("div", {
+          className: "request-history-note",
+          text: `${section.status === "rejected" ? "Rejection notes" : "Library notes"}: ${reviewNotes}`
+        }));
+      }
+
+      sectionWrap.appendChild(row);
+    });
+
+    requestList.appendChild(sectionWrap);
   });
 }
 
