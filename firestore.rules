@@ -63,6 +63,16 @@ service cloud.firestore {
       allow read, create, update, delete: if isAdmin();
     }
 
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        || (hasActiveMembership()
+          && request.resource.data.actorUid == request.auth.uid
+          && request.resource.data.actorType == "org_editor"
+          && request.resource.data.organizationId == memberOrganizationId());
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

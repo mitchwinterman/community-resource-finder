@@ -58,6 +58,7 @@ const panelCategories = document.getElementById("panel-categories");
 const panelOrganizations = document.getElementById("panel-organizations");
 const panelRequests = document.getElementById("panel-requests");
 const panelMail = document.getElementById("panel-mail");
+const panelAudit = document.getElementById("panel-audit");
 
 // Resources UI
 const resourceList = document.getElementById("resource-list");
@@ -143,10 +144,28 @@ const mailTextPreview = document.getElementById("mail-text-preview");
 const mailFilterQueuedBtn = document.getElementById("mail-filter-queued");
 const mailFilterSentBtn = document.getElementById("mail-filter-sent");
 const mailFilterFailedBtn = document.getElementById("mail-filter-failed");
+const mailSelectionCount = document.getElementById("mail-selection-count");
+const bulkDeleteMailBtn = document.getElementById("bulk-delete-mail-btn");
 const refreshMailBtn = document.getElementById("refresh-mail-btn");
+const openMailRequestBtn = document.getElementById("open-mail-request-btn");
+const openMailResourceBtn = document.getElementById("open-mail-resource-btn");
 const retryMailBtn = document.getElementById("retry-mail-btn");
 const deleteMailBtn = document.getElementById("delete-mail-btn");
 const closeMailBtn = document.getElementById("close-mail-btn");
+
+// Audit UI
+const auditList = document.getElementById("audit-list");
+const auditEditor = document.getElementById("audit-editor");
+const auditEditorTitle = document.getElementById("audit-editor-title");
+const auditSummary = document.getElementById("audit-summary");
+const auditDetails = document.getElementById("audit-details");
+const refreshAuditBtn = document.getElementById("refresh-audit-btn");
+const auditFilterAllBtn = document.getElementById("audit-filter-all");
+const auditFilterDirectoryBtn = document.getElementById("audit-filter-directory");
+const auditFilterRequestsBtn = document.getElementById("audit-filter-requests");
+const auditFilterMailBtn = document.getElementById("audit-filter-mail");
+const auditFilterAccessBtn = document.getElementById("audit-filter-access");
+const closeAuditBtn = document.getElementById("close-audit-btn");
 
 // ------------------------------------------------------
 // STATE
@@ -163,12 +182,19 @@ let resourceMeta = [];
 let membershipMeta = [];
 let requestMeta = [];
 let mailMeta = [];
+let auditMeta = [];
 let navInitialized = false;
 let activeRequestFilter = "pending";
 let activeMailFilter = "queued";
+let activeAuditFilter = "all";
+let activePanelName = "resources";
 let selectedRequestIds = new Set();
+let selectedMailIds = new Set();
 let requestEditMode = false;
 let editingMailId = null;
+let editingAuditId = null;
+let mailAutoRefreshHandle = null;
+let mailLoadInFlight = false;
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -313,6 +339,21 @@ function getMailStatusLabel(value) {
   return "queued";
 }
 
+function normalizeAuditArea(value) {
+  const area = normalizeString(value).toLowerCase();
+  if (["directory", "requests", "mail", "access"].includes(area)) return area;
+  return "all";
+}
+
+function getAuditAreaLabel(value) {
+  const area = normalizeAuditArea(value);
+  if (area === "directory") return "directory";
+  if (area === "requests") return "requests";
+  if (area === "mail") return "mail";
+  if (area === "access") return "access";
+  return "other";
+}
+
 function escapeHtml(value) {
   return normalizeString(value)
     .replace(/&/g, "&amp;")
@@ -380,6 +421,50 @@ function buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes) {
     sourceId: normalizeString(requestDoc?.id),
     status: "queued"
   };
+}
+
+async function logAuditEvent({
+  area = "all",
+  action = "",
+  entityType = "",
+  entityId = "",
+  entityLabel = "",
+  organizationId = "",
+  relatedResourceId = "",
+  relatedRequestId = "",
+  relatedMailId = "",
+  summary = "",
+  details = {}
+} = {}) {
+  try {
+    const actor = getCurrentActorMetadata();
+    await addDoc(collection(db, "audit_logs"), {
+      area: normalizeAuditArea(area),
+      action: normalizeString(action),
+      entityType: normalizeString(entityType),
+      entityId: normalizeString(entityId),
+      entityLabel: normalizeString(entityLabel),
+      organizationId: normalizeString(organizationId),
+      relatedResourceId: normalizeString(relatedResourceId),
+      relatedRequestId: normalizeString(relatedRequestId),
+      relatedMailId: normalizeString(relatedMailId),
+      actorType: "admin",
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      source: "admin_ui",
+      summary: normalizeString(summary),
+      details: details && typeof details === "object" ? details : {},
+      createdAt: serverTimestamp()
+    });
+  } catch (err) {
+    console.error("Audit log write failed:", err);
+  }
+}
+
+function getChangedFieldNames(beforeValue, afterValue, fields = []) {
+  return fields.filter(field =>
+    normalizeRequestComparableValue(beforeValue?.[field]) !== normalizeRequestComparableValue(afterValue?.[field])
+  );
 }
 
 function getFilteredRequests() {
@@ -1041,6 +1126,7 @@ onAuthStateChanged(auth, async (user) => {
   await loadMemberships();
   await loadReviewRequests();
   await loadMailQueue();
+  await loadAuditLogs();
 });
 
 // ------------------------------------------------------
@@ -1061,6 +1147,7 @@ function initNav() {
 }
 
 function setActivePanel(panelName) {
+  activePanelName = panelName;
   navButtons.forEach(b => b.classList.remove("active"));
   const active = navButtons.find(b => b.dataset.panel === panelName);
   active?.classList.add("active");
@@ -1070,6 +1157,7 @@ function setActivePanel(panelName) {
   hide(panelOrganizations);
   hide(panelRequests);
   hide(panelMail);
+  hide(panelAudit);
 
   if (panelName === "categories") {
     show(panelCategories);
@@ -1088,6 +1176,11 @@ function setActivePanel(panelName) {
 
   if (panelName === "mail") {
     show(panelMail);
+    return;
+  }
+
+  if (panelName === "audit") {
+    show(panelAudit);
     return;
   }
 
@@ -1682,12 +1775,41 @@ saveResourceBtn?.addEventListener("click", async () => {
 
   try {
     if (editingResourceId) {
+      const previousData = editingResourceData ? { ...editingResourceData } : {};
       await updateDoc(doc(db, "resources", editingResourceId), payload);
+      await logAuditEvent({
+        area: "directory",
+        action: "resource.updated",
+        entityType: "resource",
+        entityId: editingResourceId,
+        entityLabel: normalizeString(payload.Organization) || normalizeString(previousData.Organization),
+        organizationId: normalizeString(payload.organizationId),
+        relatedResourceId: editingResourceId,
+        summary: `Updated resource ${normalizeString(payload.Organization) || normalizeString(previousData.Organization) || editingResourceId}`,
+        details: {
+          changedFields: getChangedFieldNames(previousData, payload, Object.keys(payload))
+        }
+      });
     } else {
-      await addDoc(collection(db, "resources"), payload);
+      const createdRef = await addDoc(collection(db, "resources"), payload);
+      await logAuditEvent({
+        area: "directory",
+        action: "resource.created",
+        entityType: "resource",
+        entityId: createdRef.id,
+        entityLabel: normalizeString(payload.Organization),
+        organizationId: normalizeString(payload.organizationId),
+        relatedResourceId: createdRef.id,
+        summary: `Created resource ${normalizeString(payload.Organization) || createdRef.id}`,
+        details: {
+          status: normalizeString(payload.status),
+          submissionState: normalizeString(payload.submissionState)
+        }
+      });
     }
     hide(resourceEditor);
     await loadResources();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error saving resource:", err);
     alert("Error saving resource. See console for details.");
@@ -1699,9 +1821,22 @@ deleteResourceBtn?.addEventListener("click", async () => {
   if (!confirm("Delete this resource?")) return;
 
   try {
+    const previousData = editingResourceData ? { ...editingResourceData } : {};
     await deleteDoc(doc(db, "resources", editingResourceId));
+    await logAuditEvent({
+      area: "directory",
+      action: "resource.deleted",
+      entityType: "resource",
+      entityId: editingResourceId,
+      entityLabel: normalizeString(previousData.Organization),
+      organizationId: normalizeString(previousData.organizationId),
+      relatedResourceId: editingResourceId,
+      summary: `Deleted resource ${normalizeString(previousData.Organization) || editingResourceId}`,
+      details: {}
+    });
     hide(resourceEditor);
     await loadResources();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error deleting resource:", err);
     alert("Error deleting resource. See console for details.");
@@ -1831,12 +1966,38 @@ saveOrganizationBtn?.addEventListener("click", async () => {
 
   try {
     if (editingOrganizationId) {
+      const previousOrg = organizationMeta.find(org => org.id === editingOrganizationId) || {};
       await updateDoc(doc(db, "organizations", editingOrganizationId), payload);
+      await logAuditEvent({
+        area: "access",
+        action: "organization.updated",
+        entityType: "organization",
+        entityId: editingOrganizationId,
+        entityLabel: normalizeString(payload.name) || normalizeString(previousOrg.name),
+        organizationId: editingOrganizationId,
+        summary: `Updated organization ${normalizeString(payload.name) || editingOrganizationId}`,
+        details: {
+          changedFields: getChangedFieldNames(previousOrg, payload, ["name", "status", "primaryEmail", "phone", "website", "notes"])
+        }
+      });
     } else {
       payload.createdAt = serverTimestamp();
       payload.createdBy = actor.uid;
       payload.createdByEmail = actor.email;
-      await addDoc(collection(db, "organizations"), payload);
+      const createdRef = await addDoc(collection(db, "organizations"), payload);
+      await logAuditEvent({
+        area: "access",
+        action: "organization.created",
+        entityType: "organization",
+        entityId: createdRef.id,
+        entityLabel: normalizeString(payload.name),
+        organizationId: createdRef.id,
+        summary: `Created organization ${normalizeString(payload.name) || createdRef.id}`,
+        details: {
+          status: normalizeString(payload.status),
+          primaryEmail: normalizeString(payload.primaryEmail)
+        }
+      });
     }
 
     hide(organizationEditor);
@@ -1844,6 +2005,7 @@ saveOrganizationBtn?.addEventListener("click", async () => {
     await loadResources();
     await loadMemberships();
     await loadReviewRequests();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error saving organization:", err);
     alert("Error saving organization. See console for details.");
@@ -1867,12 +2029,24 @@ deleteOrganizationBtn?.addEventListener("click", async () => {
   if (!confirm("Delete this organization?")) return;
 
   try {
+    const previousOrg = organizationMeta.find(org => org.id === editingOrganizationId) || {};
     await deleteDoc(doc(db, "organizations", editingOrganizationId));
+    await logAuditEvent({
+      area: "access",
+      action: "organization.deleted",
+      entityType: "organization",
+      entityId: editingOrganizationId,
+      entityLabel: normalizeString(previousOrg.name),
+      organizationId: editingOrganizationId,
+      summary: `Deleted organization ${normalizeString(previousOrg.name) || editingOrganizationId}`,
+      details: {}
+    });
     hide(organizationEditor);
     await loadOrganizations();
     await loadResources();
     await loadMemberships();
     await loadReviewRequests();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error deleting organization:", err);
     alert("Error deleting organization. See console for details.");
@@ -2000,18 +2174,45 @@ saveMembershipBtn?.addEventListener("click", async () => {
 
   try {
     if (editingMembershipId) {
+      const previousMembership = membershipMeta.find(item => item.id === editingMembershipId) || {};
       await updateDoc(doc(db, "organization_members", editingMembershipId), payload);
+      await logAuditEvent({
+        area: "access",
+        action: "membership.updated",
+        entityType: "membership",
+        entityId: editingMembershipId,
+        entityLabel: normalizeString(payload.email) || payload.uid,
+        organizationId: normalizeString(payload.organizationId),
+        summary: `Updated editor access for ${normalizeString(payload.email) || payload.uid}`,
+        details: {
+          changedFields: getChangedFieldNames(previousMembership, payload, ["email", "organizationId", "role", "status", "notes"])
+        }
+      });
     } else {
       payload.createdAt = serverTimestamp();
       payload.createdBy = actor.uid;
       payload.createdByEmail = actor.email;
       await setDoc(doc(db, "organization_members", payload.uid), payload);
+      await logAuditEvent({
+        area: "access",
+        action: "membership.created",
+        entityType: "membership",
+        entityId: payload.uid,
+        entityLabel: normalizeString(payload.email) || payload.uid,
+        organizationId: normalizeString(payload.organizationId),
+        summary: `Granted editor access to ${normalizeString(payload.email) || payload.uid}`,
+        details: {
+          role: normalizeString(payload.role),
+          status: normalizeString(payload.status)
+        }
+      });
     }
 
     hide(membershipEditor);
     editingMembershipId = null;
     membershipUidInput.disabled = false;
     await loadMemberships();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error saving membership:", err);
     alert("Error saving organization access. See console for details.");
@@ -2023,11 +2224,23 @@ deleteMembershipBtn?.addEventListener("click", async () => {
   if (!confirm("Delete this organization access record?")) return;
 
   try {
+    const previousMembership = membershipMeta.find(item => item.id === editingMembershipId) || {};
     await deleteDoc(doc(db, "organization_members", editingMembershipId));
+    await logAuditEvent({
+      area: "access",
+      action: "membership.deleted",
+      entityType: "membership",
+      entityId: editingMembershipId,
+      entityLabel: normalizeString(previousMembership.email) || editingMembershipId,
+      organizationId: normalizeString(previousMembership.organizationId),
+      summary: `Deleted editor access for ${normalizeString(previousMembership.email) || editingMembershipId}`,
+      details: {}
+    });
     hide(membershipEditor);
     editingMembershipId = null;
     membershipUidInput.disabled = false;
     await loadMemberships();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error deleting membership:", err);
     alert("Error deleting organization access. See console for details.");
@@ -2085,11 +2298,20 @@ async function loadReviewRequests() {
   }
 }
 
-async function loadMailQueue() {
+async function loadMailQueue(options = {}) {
   if (!mailList) return;
+  if (mailLoadInFlight) return;
 
-  hide(mailEditor);
-  editingMailId = null;
+  const { preserveEditor = true } = options;
+  const openMailId = editingMailId;
+  const shouldRestoreEditor = preserveEditor && !!openMailId;
+
+  mailLoadInFlight = true;
+
+  if (!shouldRestoreEditor) {
+    hide(mailEditor);
+    editingMailId = null;
+  }
   mailList.textContent = "Loading...";
   mailMeta = [];
 
@@ -2121,11 +2343,60 @@ async function loadMailQueue() {
     });
 
     mailMeta = messages;
+    selectedMailIds = new Set(
+      Array.from(selectedMailIds).filter(id => messages.some(mailDoc => mailDoc.id === id))
+    );
     updateMailFilterUi();
+    updateMailSelectionUi();
     renderMailList(getFilteredMail());
+
+    if (shouldRestoreEditor) {
+      const openMail = messages.find(item => item.id === openMailId);
+      if (openMail) {
+        openMailEditor(openMail);
+      } else {
+        hide(mailEditor);
+        editingMailId = null;
+      }
+    }
   } catch (err) {
     console.error("Error loading mail queue:", err);
     mailList.textContent = "Error loading mail queue.";
+  } finally {
+    mailLoadInFlight = false;
+  }
+}
+
+async function loadAuditLogs() {
+  if (!auditList) return;
+
+  hide(auditEditor);
+  editingAuditId = null;
+  auditList.textContent = "Loading...";
+  auditMeta = [];
+
+  try {
+    const snap = await getDocs(collection(db, "audit_logs"));
+    const events = [];
+    snap.forEach(ds => {
+      events.push({
+        id: ds.id,
+        ...ds.data()
+      });
+    });
+
+    events.sort((a, b) => {
+      const aTime = a.createdAt?.seconds || 0;
+      const bTime = b.createdAt?.seconds || 0;
+      return bTime - aTime;
+    });
+
+    auditMeta = events;
+    updateAuditFilterUi();
+    renderAuditList(getFilteredAuditLogs());
+  } catch (err) {
+    console.error("Error loading audit logs:", err);
+    auditList.textContent = "Error loading audit logs.";
   }
 }
 
@@ -2207,6 +2478,13 @@ function updateMailFilterUi() {
 
 function setActiveMailFilter(nextFilter) {
   activeMailFilter = ["queued", "sent", "failed"].includes(nextFilter) ? nextFilter : "queued";
+  if (!["sent", "failed"].includes(activeMailFilter)) {
+    selectedMailIds.clear();
+  } else {
+    selectedMailIds = new Set(
+      Array.from(selectedMailIds).filter(id => normalizeMailStatus(mailMeta.find(item => item.id === id)?.status) === activeMailFilter)
+    );
+  }
   const openMail = mailMeta.find(item => item.id === editingMailId);
   if (openMail) {
     const visible = getFilteredMail().some(item => item.id === openMail.id);
@@ -2216,7 +2494,49 @@ function setActiveMailFilter(nextFilter) {
     }
   }
   updateMailFilterUi();
+  updateMailSelectionUi();
   renderMailList(getFilteredMail());
+}
+
+function getFilteredAuditLogs() {
+  if (activeAuditFilter === "all") return auditMeta;
+  return auditMeta.filter(eventDoc => normalizeAuditArea(eventDoc.area) === activeAuditFilter);
+}
+
+function updateAuditFilterUi() {
+  const tabConfig = [
+    { btn: auditFilterAllBtn, area: "all", label: "All", matcher: () => true },
+    { btn: auditFilterDirectoryBtn, area: "directory", label: "Directory", matcher: eventDoc => normalizeAuditArea(eventDoc.area) === "directory" },
+    { btn: auditFilterRequestsBtn, area: "requests", label: "Requests", matcher: eventDoc => normalizeAuditArea(eventDoc.area) === "requests" },
+    { btn: auditFilterMailBtn, area: "mail", label: "Mail", matcher: eventDoc => normalizeAuditArea(eventDoc.area) === "mail" },
+    { btn: auditFilterAccessBtn, area: "access", label: "Access", matcher: eventDoc => normalizeAuditArea(eventDoc.area) === "access" }
+  ];
+
+  tabConfig.forEach(({ btn, area, label, matcher }) => {
+    if (!btn) return;
+    const count = auditMeta.filter(matcher).length;
+    btn.textContent = `${label} (${count})`;
+    btn.classList.toggle("active", activeAuditFilter === area);
+  });
+}
+
+function setActiveAuditFilter(nextFilter) {
+  activeAuditFilter = ["all", "directory", "requests", "mail", "access"].includes(nextFilter) ? nextFilter : "all";
+  const openEvent = auditMeta.find(item => item.id === editingAuditId);
+  if (openEvent && !getFilteredAuditLogs().some(item => item.id === openEvent.id)) {
+    hide(auditEditor);
+    editingAuditId = null;
+  }
+  updateAuditFilterUi();
+  renderAuditList(getFilteredAuditLogs());
+}
+
+function updateMailSelectionUi() {
+  if (!mailSelectionCount || !bulkDeleteMailBtn) return;
+
+  const count = selectedMailIds.size;
+  mailSelectionCount.textContent = `${count} selected`;
+  bulkDeleteMailBtn.disabled = count === 0 || !["sent", "failed"].includes(activeMailFilter);
 }
 
 function getMailSummaryText(mailDoc) {
@@ -2236,21 +2556,79 @@ function renderMailList(messages) {
   }
 
   messages.forEach(mailDoc => {
-    const row = createEl("div", { className: "list-row list-row-stacked" });
-    row.appendChild(createEl("div", {
+    const canSelect = ["sent", "failed"].includes(activeMailFilter);
+    const row = createEl("div", {
+      className: `list-row${canSelect ? " request-list-row" : " list-row-stacked"}${selectedMailIds.has(mailDoc.id) ? " selected" : ""}`
+    });
+
+    if (canSelect) {
+      const checkWrap = createEl("label", { className: "request-row-check" });
+      const checkbox = createEl("input", {
+        attrs: { type: "checkbox", "aria-label": `Select mail for ${normalizeString(mailDoc.subject) || "message"}` }
+      });
+      checkbox.checked = selectedMailIds.has(mailDoc.id);
+      checkbox.addEventListener("click", event => {
+        event.stopPropagation();
+      });
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          selectedMailIds.add(mailDoc.id);
+        } else {
+          selectedMailIds.delete(mailDoc.id);
+        }
+        updateMailSelectionUi();
+        renderMailList(getFilteredMail());
+      });
+      checkWrap.appendChild(checkbox);
+      row.appendChild(checkWrap);
+    }
+
+    const content = createEl("div", { className: "request-row-content list-row-stacked" });
+    content.appendChild(createEl("div", {
       className: "list-row-title",
       text: normalizeString(mailDoc.subject) || "(No subject)"
     }));
-    row.appendChild(createEl("div", {
+    content.appendChild(createEl("div", {
       className: "list-row-meta",
       text: getMailSummaryText(mailDoc)
     }));
-    row.appendChild(createEl("span", {
+    content.appendChild(createEl("span", {
       className: `request-status-pill mail-status-pill ${normalizeMailStatus(mailDoc.status)}`,
       text: getMailStatusLabel(mailDoc.status)
     }));
+    row.appendChild(content);
     row.addEventListener("click", () => openMailEditor(mailDoc));
     mailList.appendChild(row);
+  });
+}
+
+function getAuditSummaryText(eventDoc) {
+  const area = getAuditAreaLabel(eventDoc.area);
+  const actorEmail = normalizeString(eventDoc.actorEmail) || normalizeString(eventDoc.actorType) || "unknown";
+  const when = formatTimestampValue(eventDoc.createdAt);
+  return `${area} | ${actorEmail} | ${when}`;
+}
+
+function renderAuditList(events) {
+  clearChildren(auditList);
+
+  if (!events.length) {
+    auditList.textContent = `No ${activeAuditFilter === "all" ? "" : activeAuditFilter + " "}audit events found.`.trim();
+    return;
+  }
+
+  events.forEach(eventDoc => {
+    const row = createEl("div", { className: "list-row list-row-stacked" });
+    row.appendChild(createEl("div", {
+      className: "list-row-title",
+      text: normalizeString(eventDoc.summary) || normalizeString(eventDoc.action) || "(Audit event)"
+    }));
+    row.appendChild(createEl("div", {
+      className: "list-row-meta",
+      text: getAuditSummaryText(eventDoc)
+    }));
+    row.addEventListener("click", () => openAuditEditor(eventDoc));
+    auditList.appendChild(row);
   });
 }
 
@@ -2286,6 +2664,40 @@ function buildMailMetaBlock(mailDoc) {
   return block;
 }
 
+function buildAuditMetaBlock(eventDoc) {
+  const block = createEl("div", { className: "request-block" });
+  block.appendChild(createEl("h4", { text: "Audit Summary" }));
+
+  const metaList = createEl("div", { className: "request-meta-list" });
+  const rows = [
+    ["Audit ID", normalizeString(eventDoc.id) || "(None)"],
+    ["Summary", normalizeString(eventDoc.summary) || "(None)"],
+    ["Action", normalizeString(eventDoc.action) || "(None)"],
+    ["Area", getAuditAreaLabel(eventDoc.area)],
+    ["Entity", normalizeString(eventDoc.entityType) && normalizeString(eventDoc.entityId)
+      ? `${normalizeString(eventDoc.entityType)} / ${normalizeString(eventDoc.entityId)}`
+      : normalizeString(eventDoc.entityType) || "(None)"],
+    ["Entity Label", normalizeString(eventDoc.entityLabel) || "(None)"],
+    ["Actor", normalizeString(eventDoc.actorEmail) || normalizeString(eventDoc.actorType) || "(Unknown)"],
+    ["Source", normalizeString(eventDoc.source) || "(None)"],
+    ["Organization", getOrganizationNameById(eventDoc.organizationId) || normalizeString(eventDoc.organizationId) || "(None)"],
+    ["Resource ID", normalizeString(eventDoc.relatedResourceId) || "(None)"],
+    ["Request ID", normalizeString(eventDoc.relatedRequestId) || "(None)"],
+    ["Mail Queue ID", normalizeString(eventDoc.relatedMailId) || "(None)"],
+    ["Created", formatTimestampValue(eventDoc.createdAt)]
+  ];
+
+  rows.forEach(([label, value]) => {
+    const row = createEl("div", { className: "request-meta-row" });
+    row.appendChild(createEl("strong", { text: label }));
+    row.appendChild(createEl("span", { text: value }));
+    metaList.appendChild(row);
+  });
+
+  block.appendChild(metaList);
+  return block;
+}
+
 function openMailEditor(mailDoc) {
   editingMailId = mailDoc?.id || null;
   mailEditorTitle.textContent = "Mail Message";
@@ -2307,8 +2719,40 @@ function openMailEditor(mailDoc) {
 
   const status = normalizeMailStatus(mailDoc?.status);
   retryMailBtn.disabled = status === "processing";
+  const requestDoc = getMailSourceRequest(mailDoc);
+  const resourceDoc = getMailSourceResource(mailDoc);
+  if (openMailRequestBtn) openMailRequestBtn.disabled = !requestDoc;
+  if (openMailResourceBtn) openMailResourceBtn.disabled = !resourceDoc;
 
   show(mailEditor);
+}
+
+function openAuditEditor(eventDoc) {
+  editingAuditId = eventDoc?.id || null;
+  auditEditorTitle.textContent = "Audit Event";
+  clearChildren(auditSummary);
+  auditDetails.textContent = formatJsonBlock(eventDoc?.details || {});
+  auditSummary.appendChild(buildAuditMetaBlock(eventDoc));
+  show(auditEditor);
+}
+
+function getMailSourceRequest(mailDoc) {
+  if (!mailDoc) return null;
+  if (normalizeString(mailDoc.sourceCollection) === "resource_change_requests" && normalizeString(mailDoc.sourceId)) {
+    return requestMeta.find(item => item.id === normalizeString(mailDoc.sourceId)) || null;
+  }
+  return null;
+}
+
+function getMailSourceResource(mailDoc) {
+  const requestDoc = getMailSourceRequest(mailDoc);
+  if (requestDoc?.resourceId) {
+    return resourceMeta.find(item => item.id === normalizeString(requestDoc.resourceId)) || null;
+  }
+  if (normalizeString(mailDoc.sourceCollection) === "resources" && normalizeString(mailDoc.sourceId)) {
+    return resourceMeta.find(item => item.id === normalizeString(mailDoc.sourceId)) || null;
+  }
+  return null;
 }
 
 async function retryMailItem() {
@@ -2325,7 +2769,21 @@ async function retryMailItem() {
       transportMessageId: "",
       updatedAt: serverTimestamp()
     });
+    await logAuditEvent({
+      area: "mail",
+      action: "mail.retry_queued",
+      entityType: "mail_queue",
+      entityId: mailDoc.id,
+      entityLabel: normalizeString(mailDoc.subject),
+      relatedMailId: mailDoc.id,
+      relatedRequestId: normalizeString(mailDoc.sourceCollection) === "resource_change_requests" ? normalizeString(mailDoc.sourceId) : "",
+      summary: `Requeued mail ${normalizeString(mailDoc.subject) || mailDoc.id}`,
+      details: {
+        to: normalizeString(mailDoc.to)
+      }
+    });
     await loadMailQueue();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error retrying mail:", err);
     alert("Error retrying mail. See console for details.");
@@ -2340,13 +2798,93 @@ async function deleteMailItem() {
 
   try {
     await deleteDoc(doc(db, "mail_queue", mailDoc.id));
+    await logAuditEvent({
+      area: "mail",
+      action: "mail.deleted",
+      entityType: "mail_queue",
+      entityId: mailDoc.id,
+      entityLabel: normalizeString(mailDoc.subject),
+      relatedMailId: mailDoc.id,
+      relatedRequestId: normalizeString(mailDoc.sourceCollection) === "resource_change_requests" ? normalizeString(mailDoc.sourceId) : "",
+      summary: `Deleted mail queue item ${normalizeString(mailDoc.subject) || mailDoc.id}`,
+      details: {
+        status: normalizeMailStatus(mailDoc.status),
+        to: normalizeString(mailDoc.to)
+      }
+    });
     hide(mailEditor);
     editingMailId = null;
     await loadMailQueue();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error deleting mail item:", err);
     alert("Error deleting mail item. See console for details.");
   }
+}
+
+async function deleteSelectedMailItems() {
+  const selectedIds = Array.from(selectedMailIds);
+  if (!selectedIds.length || !["sent", "failed"].includes(activeMailFilter)) return;
+
+  const selectedMails = mailMeta.filter(item =>
+    selectedIds.includes(item.id) && normalizeMailStatus(item.status) === activeMailFilter
+  );
+  if (!selectedMails.length) return;
+  if (!confirm(`Delete ${selectedMails.length} ${activeMailFilter} mail item(s)?`)) return;
+
+  try {
+    await Promise.all(selectedMails.map(mailDoc => deleteDoc(doc(db, "mail_queue", mailDoc.id))));
+    await Promise.all(selectedMails.map(mailDoc => logAuditEvent({
+      area: "mail",
+      action: "mail.deleted",
+      entityType: "mail_queue",
+      entityId: mailDoc.id,
+      entityLabel: normalizeString(mailDoc.subject),
+      relatedMailId: mailDoc.id,
+      relatedRequestId: normalizeString(mailDoc.sourceCollection) === "resource_change_requests" ? normalizeString(mailDoc.sourceId) : "",
+      summary: `Deleted ${activeMailFilter} mail item ${normalizeString(mailDoc.subject) || mailDoc.id}`,
+      details: {
+        status: normalizeMailStatus(mailDoc.status),
+        to: normalizeString(mailDoc.to)
+      }
+    })));
+    selectedMailIds.clear();
+    if (editingMailId && selectedIds.includes(editingMailId)) {
+      hide(mailEditor);
+      editingMailId = null;
+    }
+    await loadMailQueue();
+    await loadAuditLogs();
+  } catch (err) {
+    console.error("Error deleting selected mail items:", err);
+    alert("Error deleting selected mail items. See console for details.");
+  }
+}
+
+function openMailSourceRequest() {
+  if (!editingMailId) return;
+  const mailDoc = mailMeta.find(item => item.id === editingMailId);
+  const requestDoc = getMailSourceRequest(mailDoc);
+  if (!requestDoc) return;
+  setActivePanel("requests");
+  openRequestEditor(requestDoc);
+}
+
+function openMailSourceResource() {
+  if (!editingMailId) return;
+  const mailDoc = mailMeta.find(item => item.id === editingMailId);
+  const resourceDoc = getMailSourceResource(mailDoc);
+  if (!resourceDoc) return;
+  setActivePanel("resources");
+  openResourceEditor(resourceDoc.id, resourceDoc);
+}
+
+function initMailAutoRefresh() {
+  if (mailAutoRefreshHandle) return;
+  mailAutoRefreshHandle = window.setInterval(async () => {
+    if (activePanelName !== "mail" || adminScreen?.classList.contains("hidden")) return;
+    await loadMailQueue({ preserveEditor: true });
+  }, 15000);
 }
 
 function openRequestEditor(requestDoc) {
@@ -2405,12 +2943,44 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
 
   const mailPayload = buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes);
   if (mailPayload) {
-    await addDoc(collection(db, "mail_queue"), {
+    const mailRef = await addDoc(collection(db, "mail_queue"), {
       ...mailPayload,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
+    await logAuditEvent({
+      area: "mail",
+      action: "mail.queued",
+      entityType: "mail_queue",
+      entityId: mailRef.id,
+      entityLabel: normalizeString(mailPayload.subject),
+      organizationId: normalizeString(requestDoc.organizationId),
+      relatedMailId: mailRef.id,
+      relatedRequestId: normalizeString(requestDoc.id),
+      relatedResourceId: normalizeString(requestDoc.resourceId),
+      summary: `Queued ${normalizeRequestStatus(nextStatus)} email for ${normalizeString(requestDoc.resourceName) || requestDoc.id}`,
+      details: {
+        to: normalizeString(mailPayload.to),
+        type: normalizeString(mailPayload.type)
+      }
+    });
   }
+
+  await logAuditEvent({
+    area: "requests",
+    action: `request.${normalizeRequestStatus(nextStatus)}`,
+    entityType: "request",
+    entityId: normalizeString(requestDoc.id),
+    entityLabel: normalizeString(requestDoc.resourceName),
+    organizationId: normalizeString(requestDoc.organizationId),
+    relatedRequestId: normalizeString(requestDoc.id),
+    relatedResourceId: normalizeString(requestDoc.resourceId),
+    summary: `${normalizeRequestStatus(nextStatus) === "approved" ? "Approved" : "Rejected"} request for ${normalizeString(requestDoc.resourceName) || requestDoc.id}`,
+    details: {
+      reviewNotes: normalizeString(reviewNotes),
+      editedBeforeApproval: Boolean(overrideProposedData && nextStatus === "approved")
+    }
+  });
 }
 
 async function reviewRequest(nextStatus) {
@@ -2432,6 +3002,7 @@ async function reviewRequest(nextStatus) {
     setRequestEditMode(false);
     await loadResources();
     await loadReviewRequests();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error reviewing request:", err);
     alert("Error updating change request. See console for details.");
@@ -2447,11 +3018,24 @@ async function deleteSingleRequest() {
 
   try {
     await deleteDoc(doc(db, "resource_change_requests", requestDoc.id));
+    await logAuditEvent({
+      area: "requests",
+      action: "request.deleted",
+      entityType: "request",
+      entityId: requestDoc.id,
+      entityLabel: normalizeString(requestDoc.resourceName),
+      organizationId: normalizeString(requestDoc.organizationId),
+      relatedRequestId: requestDoc.id,
+      relatedResourceId: normalizeString(requestDoc.resourceId),
+      summary: `Deleted request for ${normalizeString(requestDoc.resourceName) || requestDoc.id}`,
+      details: {}
+    });
     selectedRequestIds.delete(requestDoc.id);
     hide(requestEditor);
     editingRequestId = null;
     setRequestEditMode(false);
     await loadReviewRequests();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error deleting request:", err);
     alert("Error deleting change request. See console for details.");
@@ -2477,6 +3061,18 @@ async function applyBulkRequestAction(action) {
       await Promise.all(selectedRequests.map(requestDoc =>
         deleteDoc(doc(db, "resource_change_requests", requestDoc.id))
       ));
+      await Promise.all(selectedRequests.map(requestDoc => logAuditEvent({
+        area: "requests",
+        action: "request.deleted",
+        entityType: "request",
+        entityId: requestDoc.id,
+        entityLabel: normalizeString(requestDoc.resourceName),
+        organizationId: normalizeString(requestDoc.organizationId),
+        relatedRequestId: requestDoc.id,
+        relatedResourceId: normalizeString(requestDoc.resourceId),
+        summary: `Deleted request for ${normalizeString(requestDoc.resourceName) || requestDoc.id}`,
+        details: { bulkAction: true }
+      })));
     } else {
       await Promise.all(selectedRequests.map(requestDoc =>
         applyReviewAction(requestDoc, action, "")
@@ -2493,6 +3089,7 @@ async function applyBulkRequestAction(action) {
       setRequestEditMode(false);
     }
     await loadReviewRequests();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error applying bulk request action:", err);
     alert("Error applying bulk request action. See console for details.");
@@ -2558,6 +3155,18 @@ refreshMailBtn?.addEventListener("click", async () => {
   await loadMailQueue();
 });
 
+bulkDeleteMailBtn?.addEventListener("click", async () => {
+  await deleteSelectedMailItems();
+});
+
+openMailRequestBtn?.addEventListener("click", () => {
+  openMailSourceRequest();
+});
+
+openMailResourceBtn?.addEventListener("click", () => {
+  openMailSourceResource();
+});
+
 retryMailBtn?.addEventListener("click", async () => {
   await retryMailItem();
 });
@@ -2569,6 +3178,37 @@ deleteMailBtn?.addEventListener("click", async () => {
 closeMailBtn?.addEventListener("click", () => {
   hide(mailEditor);
   editingMailId = null;
+});
+
+initMailAutoRefresh();
+
+refreshAuditBtn?.addEventListener("click", async () => {
+  await loadAuditLogs();
+});
+
+auditFilterAllBtn?.addEventListener("click", () => {
+  setActiveAuditFilter("all");
+});
+
+auditFilterDirectoryBtn?.addEventListener("click", () => {
+  setActiveAuditFilter("directory");
+});
+
+auditFilterRequestsBtn?.addEventListener("click", () => {
+  setActiveAuditFilter("requests");
+});
+
+auditFilterMailBtn?.addEventListener("click", () => {
+  setActiveAuditFilter("mail");
+});
+
+auditFilterAccessBtn?.addEventListener("click", () => {
+  setActiveAuditFilter("access");
+});
+
+closeAuditBtn?.addEventListener("click", () => {
+  hide(auditEditor);
+  editingAuditId = null;
 });
 
 // ------------------------------------------------------
@@ -2679,13 +3319,37 @@ saveCategoryBtn?.addEventListener("click", async () => {
 
   try {
     if (editingCategoryId) {
+      const previousCategory = categoryMeta.find(cat => cat.id === editingCategoryId) || {};
       await updateDoc(doc(db, "categories", editingCategoryId), payload);
+      await logAuditEvent({
+        area: "directory",
+        action: "category.updated",
+        entityType: "category",
+        entityId: editingCategoryId,
+        entityLabel: normalizeString(payload.name) || normalizeString(previousCategory.name),
+        summary: `Updated category ${normalizeString(payload.name) || editingCategoryId}`,
+        details: {
+          changedFields: getChangedFieldNames(previousCategory, payload, ["name", "subcategories"])
+        }
+      });
     } else {
-      await addDoc(collection(db, "categories"), payload);
+      const createdRef = await addDoc(collection(db, "categories"), payload);
+      await logAuditEvent({
+        area: "directory",
+        action: "category.created",
+        entityType: "category",
+        entityId: createdRef.id,
+        entityLabel: normalizeString(payload.name),
+        summary: `Created category ${normalizeString(payload.name) || createdRef.id}`,
+        details: {
+          subcategoryCount: Array.isArray(payload.subcategories) ? payload.subcategories.length : 0
+        }
+      });
     }
     hide(categoryEditor);
     await loadCategories();
     await loadResources();
+    await loadAuditLogs();
     if (normalizedSubs.changes.length > 0) {
       const preview = normalizedSubs.changes
         .slice(0, 8)
@@ -2708,10 +3372,21 @@ deleteCategoryBtn?.addEventListener("click", async () => {
   if (!confirm("Delete this category?")) return;
 
   try {
+    const previousCategory = categoryMeta.find(cat => cat.id === editingCategoryId) || {};
     await deleteDoc(doc(db, "categories", editingCategoryId));
+    await logAuditEvent({
+      area: "directory",
+      action: "category.deleted",
+      entityType: "category",
+      entityId: editingCategoryId,
+      entityLabel: normalizeString(previousCategory.name),
+      summary: `Deleted category ${normalizeString(previousCategory.name) || editingCategoryId}`,
+      details: {}
+    });
     hide(categoryEditor);
     await loadCategories();
     await loadResources();
+    await loadAuditLogs();
   } catch (err) {
     console.error("Error deleting category:", err);
     alert("Error deleting category. See console for details.");

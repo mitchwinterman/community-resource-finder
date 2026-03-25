@@ -73,6 +73,7 @@
             <button class="nav-btn" data-panel="organizations">Edit Organizations</button>
             <button class="nav-btn" data-panel="requests">Review Requests</button>
             <button class="nav-btn" data-panel="mail">Mail Queue</button>
+            <button class="nav-btn" data-panel="audit">Audit Logs</button>
         </div>
 
         <!-- RESOURCES PANEL -->
@@ -308,6 +309,10 @@
                     <button id="mail-filter-sent" class="request-filter-tab" type="button">Sent</button>
                     <button id="mail-filter-failed" class="request-filter-tab" type="button">Failed</button>
                 </div>
+                <div class="request-bulk-actions">
+                    <span id="mail-selection-count" class="request-selection-count">0 selected</span>
+                    <button id="bulk-delete-mail-btn" type="button" class="danger-btn">Delete Selected</button>
+                </div>
             </div>
 
             <div class="admin-split">
@@ -331,9 +336,49 @@
                         </div>
 
                         <div class="editor-actions">
+                            <button id="open-mail-request-btn" type="button">Open Request</button>
+                            <button id="open-mail-resource-btn" type="button">Open Resource</button>
                             <button id="retry-mail-btn" type="button">Retry</button>
                             <button id="delete-mail-btn" type="button" class="danger-btn">Delete</button>
                             <button id="close-mail-btn" type="button">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- AUDIT PANEL -->
+        <div id="panel-audit" class="panel hidden">
+
+            <div class="panel-header">
+                <h3>Audit Logs</h3>
+                <button id="refresh-audit-btn" type="button">Refresh Logs</button>
+            </div>
+
+            <div class="request-toolbar">
+                <div class="request-filter-tabs" role="tablist" aria-label="Audit log filters">
+                    <button id="audit-filter-all" class="request-filter-tab active" type="button">All</button>
+                    <button id="audit-filter-directory" class="request-filter-tab" type="button">Directory</button>
+                    <button id="audit-filter-requests" class="request-filter-tab" type="button">Requests</button>
+                    <button id="audit-filter-mail" class="request-filter-tab" type="button">Mail</button>
+                    <button id="audit-filter-access" class="request-filter-tab" type="button">Access</button>
+                </div>
+            </div>
+
+            <div class="admin-split">
+                <div class="admin-list" id="audit-list"></div>
+
+                <div class="admin-editor">
+                    <div id="audit-editor" class="editor hidden">
+                        <h3 id="audit-editor-title">Audit Event</h3>
+                        <div id="audit-summary" class="request-summary"></div>
+                        <div class="request-block">
+                            <h4>Details</h4>
+                            <pre id="audit-details" class="mail-text-preview"></pre>
+                        </div>
+                        <div class="editor-actions">
+                            <button id="close-audit-btn" type="button">Close</button>
                         </div>
                     </div>
                 </div>

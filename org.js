@@ -260,6 +260,42 @@ function getCurrentActor() {
   };
 }
 
+async function logOrgAuditEvent({
+  action = "",
+  entityType = "",
+  entityId = "",
+  entityLabel = "",
+  organizationId = "",
+  relatedResourceId = "",
+  relatedRequestId = "",
+  summary = "",
+  details = {}
+} = {}) {
+  try {
+    const actor = getCurrentActor();
+    await addDoc(collection(db, "audit_logs"), {
+      area: "requests",
+      action: normalizeString(action),
+      entityType: normalizeString(entityType),
+      entityId: normalizeString(entityId),
+      entityLabel: normalizeString(entityLabel),
+      organizationId: normalizeString(organizationId),
+      relatedResourceId: normalizeString(relatedResourceId),
+      relatedRequestId: normalizeString(relatedRequestId),
+      relatedMailId: "",
+      actorType: "org_editor",
+      actorUid: actor.uid,
+      actorEmail: actor.email,
+      source: "org_portal",
+      summary: normalizeString(summary),
+      details: details && typeof details === "object" ? details : {},
+      createdAt: serverTimestamp()
+    });
+  } catch (err) {
+    console.error("Org audit log write failed:", err);
+  }
+}
+
 async function loadOrganizationForMembership(membership) {
   const organizationId = normalizeString(membership?.organizationId);
   if (!organizationId) {
@@ -745,7 +781,7 @@ submitRequestBtn?.addEventListener("click", async () => {
   const submitterNotes = normalizeString(submitterNotesInput.value);
 
   try {
-    await addDoc(collection(db, "resource_change_requests"), {
+    const requestRef = await addDoc(collection(db, "resource_change_requests"), {
       resourceId: editingResource.id,
       resourceName: normalizeString(editingResource.Organization),
       organizationId: normalizeString(membershipDoc.organizationId),
@@ -757,6 +793,21 @@ submitRequestBtn?.addEventListener("click", async () => {
       reviewNotes: "",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
+    });
+
+    await logOrgAuditEvent({
+      action: "request.submitted",
+      entityType: "request",
+      entityId: requestRef.id,
+      entityLabel: normalizeString(editingResource.Organization),
+      organizationId: normalizeString(membershipDoc.organizationId),
+      relatedResourceId: editingResource.id,
+      relatedRequestId: requestRef.id,
+      summary: `Submitted update request for ${normalizeString(editingResource.Organization) || requestRef.id}`,
+      details: {
+        submitterNotes,
+        changedFieldCount: Object.keys(proposedData).length
+      }
     });
 
     alert("Update submitted for library review.");

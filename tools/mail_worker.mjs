@@ -7,6 +7,8 @@ import process from "node:process";
 import admin from "firebase-admin";
 
 const DEFAULT_LIMIT = 25;
+const SENT_RETENTION_DAYS = 183;
+const SENT_CLEANUP_SCAN_LIMIT = 200;
 const args = process.argv.slice(2);
 const limitArgIndex = args.findIndex(arg => arg === "--limit");
 const limit = (() => {
@@ -158,6 +160,58 @@ async function markFailed(docId, error) {
   });
 }
 
+async function logSystemAuditEvent({
+  action = "",
+  entityType = "",
+  entityId = "",
+  entityLabel = "",
+  organizationId = "",
+  relatedResourceId = "",
+  relatedRequestId = "",
+  relatedMailId = "",
+  summary = "",
+  details = {}
+} = {}) {
+  await db.collection("audit_logs").add({
+    area: "mail",
+    action: normalizeString(action),
+    entityType: normalizeString(entityType),
+    entityId: normalizeString(entityId),
+    entityLabel: normalizeString(entityLabel),
+    organizationId: normalizeString(organizationId),
+    relatedResourceId: normalizeString(relatedResourceId),
+    relatedRequestId: normalizeString(relatedRequestId),
+    relatedMailId: normalizeString(relatedMailId),
+    actorType: "system",
+    actorUid: "mail_worker",
+    actorEmail: "",
+    source: "mail_worker",
+    summary: normalizeString(summary),
+    details: details && typeof details === "object" ? details : {},
+    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+}
+
+function isOlderThanRetention(timestampValue) {
+  const millis = timestampValue?.toMillis?.();
+  if (!millis) return false;
+  const cutoff = Date.now() - (SENT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  return millis < cutoff;
+}
+
+async function cleanupOldSentMail() {
+  const snapshot = await db.collection("mail_queue")
+    .where("status", "==", "sent")
+    .limit(SENT_CLEANUP_SCAN_LIMIT)
+    .get();
+
+  const staleDocs = snapshot.docs.filter(docSnap => isOlderThanRetention(docSnap.data()?.sentAt));
+  if (!staleDocs.length) return 0;
+
+  await Promise.all(staleDocs.map(docSnap => docSnap.ref.delete()));
+  return staleDocs.length;
+}
+
 async function main() {
   const snapshot = await db.collection("mail_queue")
     .where("status", "==", "queued")
@@ -183,14 +237,55 @@ async function main() {
       }
 
       await markSent(claimed.id, result);
+      await logSystemAuditEvent({
+        action: "mail.sent",
+        entityType: "mail_queue",
+        entityId: claimed.id,
+        entityLabel: normalizeString(claimed.subject),
+        relatedMailId: claimed.id,
+        relatedRequestId: normalizeString(claimed.sourceCollection) === "resource_change_requests" ? normalizeString(claimed.sourceId) : "",
+        summary: `Sent mail ${normalizeString(claimed.subject) || claimed.id}`,
+        details: {
+          to: normalizeString(claimed.to),
+          transportMessageId: normalizeString(result?.transportMessageId)
+        }
+      });
       sent += 1;
     } catch (error) {
       await markFailed(claimed.id, error);
+      await logSystemAuditEvent({
+        action: "mail.failed",
+        entityType: "mail_queue",
+        entityId: claimed.id,
+        entityLabel: normalizeString(claimed.subject),
+        relatedMailId: claimed.id,
+        relatedRequestId: normalizeString(claimed.sourceCollection) === "resource_change_requests" ? normalizeString(claimed.sourceId) : "",
+        summary: `Mail failed ${normalizeString(claimed.subject) || claimed.id}`,
+        details: {
+          to: normalizeString(claimed.to),
+          error: normalizeString(error?.message || String(error))
+        }
+      });
       failed += 1;
     }
   }
 
   console.log(`Processed ${snapshot.size} queued mail item(s). Sent: ${sent}. Failed: ${failed}.`);
+  const deletedCount = await cleanupOldSentMail();
+  if (deletedCount > 0) {
+    await logSystemAuditEvent({
+      action: "mail.cleanup_deleted",
+      entityType: "mail_queue",
+      entityId: "",
+      entityLabel: "",
+      summary: `Deleted ${deletedCount} sent mail item(s) older than ${SENT_RETENTION_DAYS} days`,
+      details: {
+        deletedCount,
+        retentionDays: SENT_RETENTION_DAYS
+      }
+    });
+    console.log(`Deleted ${deletedCount} sent mail item(s) older than ${SENT_RETENTION_DAYS} days.`);
+  }
 }
 
 main().catch(error => {

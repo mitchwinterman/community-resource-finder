@@ -50,6 +50,7 @@ Top-level files:
 - `tools/set_admin_claim.mjs`: one-time script to grant or remove the Firebase `admin` custom claim
 - `tools/mail_worker.mjs`: recurring outbound mail worker that drains `mail_queue` through Outlook Desktop
 - `tools/send_outlook_mail.ps1`: Outlook COM bridge used by the mail worker on Windows
+- `tools/run_mail_worker.ps1`: scheduler-friendly wrapper that sets env vars and launches the Outlook mail worker
 - `firebase.js`: Firebase app, Firestore, and Auth initialization
 - `data.json`: legacy resource data snapshot retained for reference
 - `categories.json`: canonical category/subcategory snapshot retained for reference
@@ -115,13 +116,15 @@ The Firebase web config is committed directly in the repository. That is normal 
 
 ## Data Model
 
-The repo currently uses five active Firestore collections:
+The repo currently uses seven active Firestore collections:
 
 - `resources`
 - `categories`
 - `organizations`
 - `organization_members`
 - `resource_change_requests`
+- `mail_queue`
+- `audit_logs`
 
 ### `resources` Collection
 
@@ -321,6 +324,41 @@ Notes:
 - the Windows Outlook worker in `tools/mail_worker.mjs` can process and send these documents
 - approval/rejection emails now flow through this queue
 - future invite/setup emails can reuse the same queue and sender
+
+### `audit_logs` Collection
+
+This collection is an immutable operational audit trail for the admin UI, org portal, and mail worker.
+
+Each document is expected to look roughly like this:
+
+```json
+{
+  "area": "requests",
+  "action": "request.approved",
+  "entityType": "request",
+  "entityId": "<request doc id>",
+  "entityLabel": "AARP",
+  "organizationId": "<organizations doc id>",
+  "relatedResourceId": "<resources doc id>",
+  "relatedRequestId": "<request doc id>",
+  "relatedMailId": "<mail_queue doc id>",
+  "actorType": "admin",
+  "actorUid": "<firebase-auth-uid>",
+  "actorEmail": "admin@example.org",
+  "source": "admin_ui",
+  "summary": "Approved request for AARP",
+  "details": {
+    "reviewNotes": "Looks good"
+  },
+  "createdAt": "<timestamp>"
+}
+```
+
+Notes:
+
+- reads are admin-only
+- admin actions, org request submissions, and mail-worker outcomes can all write to this collection
+- the admin `Audit Logs` panel reads from this collection for operations review
 
 ## Login Details
 
@@ -688,6 +726,12 @@ The intended sender for this repo is the local Outlook Desktop worker in `tools/
 
 The same queue can later be reused for org-editor invite/setup emails.
 
+Operational queue policy:
+
+- failed mail items stay in `mail_queue` until staff retry or delete them manually
+- sent mail items can be bulk-deleted from the admin UI
+- the background worker automatically deletes sent mail items older than roughly 6 months
+
 ### Outlook Mail Worker Setup
 
 The mail worker does not use SMTP credentials. It uses the currently configured Outlook Desktop profile on the Windows machine that runs it.
@@ -722,7 +766,7 @@ Example PowerShell session:
 ```powershell
 $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\firebase-service-account.json"
 $env:CRF_OUTLOOK_FROM_EMAIL="mwinterman@washoecounty.gov"
-$env:CRF_PUBLIC_BASE_URL="https://your-live-site.example"
+$env:CRF_PUBLIC_BASE_URL="https://mitchwinterman.github.io/community-resource-finder"
 npm.cmd run mail-worker
 ```
 
@@ -737,19 +781,20 @@ powershell.exe
 Add arguments:
 
 ```text
--NoProfile -ExecutionPolicy Bypass -Command "$env:GOOGLE_APPLICATION_CREDENTIALS='C:\path\to\firebase-service-account.json'; $env:CRF_OUTLOOK_FROM_EMAIL='mwinterman@washoecounty.gov'; $env:CRF_PUBLIC_BASE_URL='https://your-live-site.example'; & 'C:\Users\mwinterman\Documents\NODE\node-v25.8.1-win-x64\node.exe' 'C:\Users\mwinterman\Documents\GitHub\community-resource-finder\tools\mail_worker.mjs' --limit 25"
+-NoProfile -ExecutionPolicy Bypass -File "C:\Users\mwinterman\Documents\GitHub\community-resource-finder\tools\run_mail_worker.ps1" -ServiceAccountPath "C:\Users\mwinterman\Documents\GitHub\CRF Extras\washoe-community-resources-firebase-adminsdk-fbsvc-fb80802fe8.json"
 ```
 
 Recommended scheduler settings:
 
 - run every 5 minutes
-- run whether the user is logged on or not
+- run only when the user is logged on
 - use a Windows account that has the correct Outlook profile configured
 
 Operational notes:
 
 - if Outlook is signed out, locked down by policy, or prompts for reauthentication, mail may remain queued or fail
 - if your Windows password or Microsoft 365 password changes, the worker should continue sending after Outlook itself has been reauthenticated
+- the wrapper script defaults `CRF_PUBLIC_BASE_URL` to `https://mitchwinterman.github.io/community-resource-finder`
 - this worker is intended for a trusted internal machine, not an end-user workstation
 
 ### Production Checklist
