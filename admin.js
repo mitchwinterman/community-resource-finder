@@ -330,6 +330,8 @@ function buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes) {
   }
 
   const resourceName = normalizeString(requestDoc?.resourceName) || "your resource update";
+  const requestId = normalizeString(requestDoc?.id);
+  const resourceId = normalizeString(requestDoc?.resourceId);
   const reviewedAt = new Date().toLocaleString();
   const orgPortalUrl = `${window.location.origin}/login.html`;
   const intro = status === "approved"
@@ -343,6 +345,8 @@ function buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes) {
     `Reviewed: ${reviewedAt}`,
     notesText ? "" : "",
     notesText ? `Library notes:\n${notesText}` : "",
+    requestId ? `Request ID: ${requestId}` : "",
+    resourceId ? `Resource ID: ${resourceId}` : "",
     "",
     `Organization portal: ${orgPortalUrl}`,
     "If you have questions, reply to this email or contact library staff."
@@ -353,6 +357,14 @@ function buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes) {
     `<p><strong>Reviewed:</strong> ${escapeHtml(reviewedAt)}</p>`,
     notesText
       ? `<p><strong>Library notes:</strong><br>${escapeHtml(notesText).replace(/\r?\n/g, "<br>")}</p>`
+      : "",
+    requestId || resourceId
+      ? `<p>${
+        [
+          requestId ? `<strong>Request ID:</strong> ${escapeHtml(requestId)}` : "",
+          resourceId ? `<strong>Resource ID:</strong> ${escapeHtml(resourceId)}` : ""
+        ].filter(Boolean).join("<br>")
+      }</p>`
       : "",
     `<p><a href="${escapeHtml(orgPortalUrl)}">Open the organization portal</a></p>`,
     "<p>If you have questions, reply to this email or contact library staff.</p>"
@@ -2248,6 +2260,7 @@ function buildMailMetaBlock(mailDoc) {
 
   const metaList = createEl("div", { className: "request-meta-list" });
   const rows = [
+    ["Mail Queue ID", normalizeString(mailDoc.id) || "(None)"],
     ["To", normalizeString(mailDoc.to) || "(None)"],
     ["Subject", normalizeString(mailDoc.subject) || "(None)"],
     ["Status", getMailStatusLabel(mailDoc.status)],
