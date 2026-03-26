@@ -321,6 +321,10 @@ confirmReviewBtn?.addEventListener("click", async () => {
       status: "confirmed"
     };
     renderReviewState();
+    setMessage("Thanks. Your confirmation has been received and sent to library staff for review. Redirecting you to the organization portal…", "success");
+    window.setTimeout(() => {
+      window.location.href = getLoginUrl();
+    }, 1500);
   } catch (err) {
     console.error("Error confirming review:", err);
     confirmReviewBtn.disabled = false;

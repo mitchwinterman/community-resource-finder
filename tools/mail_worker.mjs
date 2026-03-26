@@ -6,6 +6,12 @@ import { randomBytes } from "node:crypto";
 import process from "node:process";
 
 import admin from "firebase-admin";
+import {
+  normalizeWebsiteList,
+  normalizePhoneEntries,
+  getPhoneDisplayText,
+  getWebsiteDisplayText
+} from "../contact-fields.js";
 
 const DEFAULT_LIMIT = 25;
 const SENT_RETENTION_DAYS = 183;
@@ -35,6 +41,27 @@ const REVIEW_REMINDER_DAYS = 90;
 const FAILED_REVIEW_RETRY_HOURS = 24;
 const REVIEW_TOKEN_EXPIRATION_DAYS = 120;
 const requestAccessMailto = "mailto:mwinterman@washoecounty.gov?subject=Community%20Resource%20Finder%20Editor%20Access%20Request";
+const reviewRequestEditableFields = [
+  "Organization",
+  "Description",
+  "DescriptionDelta",
+  "Categories",
+  "Subcategories",
+  "Keywords",
+  "Websites",
+  "PhoneNumbers",
+  "Email",
+  "Address",
+  "City",
+  "Zip",
+  "Hours",
+  "Eligibility",
+  "Cost",
+  "Languages",
+  "Last Verified",
+  "Notes",
+  "NotesDelta"
+];
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -51,6 +78,56 @@ function normalizeBaseUrl(value) {
   } catch {
     return "";
   }
+}
+
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => normalizeString(item)).filter(Boolean);
+}
+
+function cloneStructuredValue(value) {
+  if (value == null) return null;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function sanitizeRequestSnapshot(resource) {
+  const source = resource && typeof resource === "object" ? resource : {};
+  const payload = {};
+
+  reviewRequestEditableFields.forEach(field => {
+    const rawValue = source[field];
+
+    if (field === "DescriptionDelta" || field === "NotesDelta") {
+      payload[field] = cloneStructuredValue(rawValue);
+      return;
+    }
+
+    if (field === "Categories" || field === "Subcategories") {
+      payload[field] = normalizeStringArray(rawValue);
+      return;
+    }
+
+    if (field === "Websites") {
+      payload[field] = normalizeWebsiteList(rawValue);
+      return;
+    }
+
+    if (field === "PhoneNumbers") {
+      payload[field] = normalizePhoneEntries(rawValue);
+      return;
+    }
+
+    if (typeof rawValue === "string") {
+      payload[field] = rawValue.trim();
+      return;
+    }
+
+    payload[field] = normalizeString(rawValue);
+  });
+
+  payload.Website = "";
+  payload.Phone = "";
+  return payload;
 }
 
 function rewriteLocalUrls(content) {
@@ -998,10 +1075,10 @@ async function processConfirmedReviewConfirmations(limit) {
 
   let applied = 0;
   let failed = 0;
-  const todayString = formatLocalDate(new Date());
 
   for (const docSnap of snapshot.docs) {
-    const confirmation = { id: docSnap.id, ...docSnap.data() };
+    const confirmation = await claimStatusDoc(docSnap.ref, "confirmed");
+    if (!confirmation) continue;
 
     try {
       const resourceId = normalizeString(confirmation.resourceId);
@@ -1009,19 +1086,36 @@ async function processConfirmedReviewConfirmations(limit) {
         throw new Error("Confirmation is missing a resource id.");
       }
 
-      await db.collection("resources").doc(resourceId).update({
-        "Last Verified": todayString,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedByUid: normalizeString(confirmation.recipientUid),
-        updatedByEmail: normalizeString(confirmation.recipientEmail),
-        UpdatedBy: "Quarterly review confirmation"
+      const resourceSnap = await db.collection("resources").doc(resourceId).get();
+      if (!resourceSnap.exists) {
+        throw new Error("Linked resource could not be found.");
+      }
+
+      const resource = { id: resourceSnap.id, ...resourceSnap.data() };
+      const proposedData = sanitizeRequestSnapshot(resource);
+      const requestRef = await db.collection("resource_change_requests").add({
+        resourceId,
+        resourceName: normalizeString(confirmation.resourceName) || normalizeString(resource.Organization) || resourceId,
+        organizationId: normalizeString(confirmation.organizationId) || normalizeString(resource.organizationId),
+        submittedByUid: normalizeString(confirmation.recipientUid),
+        submittedByEmail: normalizeString(confirmation.recipientEmail),
+        status: "pending",
+        requestType: "quarterly_confirmation",
+        reviewTokenId: confirmation.id,
+        reviewConfirmedAt: confirmation.confirmedAt || admin.firestore.FieldValue.serverTimestamp(),
+        proposedData,
+        submitterNotes: "Quarterly review confirmation: listing confirmed with no content changes requested.",
+        reviewNotes: "",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
       await docSnap.ref.update({
         status: "applied",
         appliedAt: admin.firestore.FieldValue.serverTimestamp(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        error: ""
+        error: "",
+        requestId: requestRef.id
       });
 
       const siblingSnap = await db.collection("review_confirmations")
@@ -1043,16 +1137,17 @@ async function processConfirmedReviewConfirmations(limit) {
       }
 
       await logSystemAuditEvent({
-        action: "review.confirmation_applied",
+        action: "review.confirmation_request_created",
         entityType: "review_confirmation",
         entityId: docSnap.id,
         entityLabel: normalizeString(confirmation.resourceName),
         organizationId: normalizeString(confirmation.organizationId),
         relatedResourceId: resourceId,
-        summary: `Applied quarterly review confirmation for ${normalizeString(confirmation.resourceName) || resourceId}`,
+        relatedRequestId: requestRef.id,
+        summary: `Created no-change review request for ${normalizeString(confirmation.resourceName) || resourceId}`,
         details: {
           recipientEmail: normalizeString(confirmation.recipientEmail),
-          reviewDate: todayString
+          requestId: requestRef.id
         }
       });
       applied += 1;

@@ -719,6 +719,13 @@ function getReviewConfirmationsForResource(resourceId) {
 
 function getReviewConfirmationActivity(resourceId) {
   const confirmations = getReviewConfirmationsForResource(resourceId);
+  const latestRequestAt = getLatestDate(requestMeta
+    .filter(item => normalizeString(item.resourceId) === normalizeString(resourceId))
+    .map(item => getLatestDate([
+      getValueDate(item.createdAt),
+      getValueDate(item.reviewedAt),
+      getValueDate(item.updatedAt)
+    ])));
   const latestByField = fieldName => getLatestDate(confirmations.map(item => getValueDate(item[fieldName])));
   const latestSent = latestByField("sentAt");
   const latestConfirmed = latestByField("confirmedAt");
@@ -731,6 +738,18 @@ function getReviewConfirmationActivity(resourceId) {
       getValueDate(item.createdAt)
     ])
   ));
+  const isStillOutstanding = (item, statusName) => {
+    if (normalizeReviewConfirmationStatus(item.status) !== statusName) return false;
+    if (!(latestRequestAt instanceof Date)) return true;
+
+    const tokenTime = getLatestDate([
+      getValueDate(item.confirmedAt),
+      getValueDate(item.sentAt),
+      getValueDate(item.createdAt)
+    ]);
+
+    return !(tokenTime instanceof Date) || tokenTime.getTime() > latestRequestAt.getTime();
+  };
 
   return {
     confirmations,
@@ -738,8 +757,9 @@ function getReviewConfirmationActivity(resourceId) {
     latestConfirmed,
     latestApplied,
     latestAny,
-    sentCount: confirmations.filter(item => normalizeReviewConfirmationStatus(item.status) === "sent").length,
-    confirmedCount: confirmations.filter(item => normalizeReviewConfirmationStatus(item.status) === "confirmed").length,
+    latestRequestAt,
+    sentCount: confirmations.filter(item => isStillOutstanding(item, "sent")).length,
+    confirmedCount: confirmations.filter(item => isStillOutstanding(item, "confirmed")).length,
     failedCount: confirmations.filter(item => normalizeReviewConfirmationStatus(item.status) === "failed").length,
     recipientEmails: Array.from(new Set(confirmations
       .map(item => normalizeString(item.recipientEmail).toLowerCase())
@@ -1020,9 +1040,13 @@ function buildRequestMetaBlock(requestDoc) {
   block.appendChild(createEl("h4", { text: "Request Summary" }));
 
   const metaList = createEl("div", { className: "request-meta-list" });
+  const requestType = normalizeString(requestDoc.requestType) === "quarterly_confirmation"
+    ? "Quarterly no-change confirmation"
+    : "Resource edit request";
   const rows = [
     ["Resource", normalizeString(requestDoc.resourceName) || "(Unnamed resource)"],
     ["Organization", getOrganizationNameById(requestDoc.organizationId) || requestDoc.organizationId || "(Unknown organization)"],
+    ["Request type", requestType],
     ["Status", getRequestStatusLabel(requestDoc.status)],
     ["Submitted by", normalizeString(requestDoc.submittedByEmail) || normalizeString(requestDoc.submittedByUid) || "(Unknown user)"],
     ["Submitted at", formatTimestampValue(requestDoc.createdAt)],
@@ -1199,7 +1223,7 @@ function valuesMatchForReview(fieldConfig, currentValue, proposedValue) {
   return currentComparable === proposedComparable;
 }
 
-function buildRequestDiffList(currentResource, proposedData) {
+function buildRequestDiffList(currentResource, proposedData, requestDoc = null) {
   const wrapper = createEl("div", { className: "request-block" });
   wrapper.appendChild(createEl("h4", { text: "Requested Changes" }));
 
@@ -1222,7 +1246,9 @@ function buildRequestDiffList(currentResource, proposedData) {
     emptyState.appendChild(createEl("h5", { text: "No changed fields detected" }));
     emptyState.appendChild(createEl("div", {
       className: "request-value empty",
-      text: "The submitted request matches the current live values for all reviewable fields."
+      text: normalizeString(requestDoc?.requestType) === "quarterly_confirmation"
+        ? "The editor confirmed that the current live listing still looks correct and did not request content changes."
+        : "The submitted request matches the current live values for all reviewable fields."
     }));
     list.appendChild(emptyState);
   }
@@ -3392,7 +3418,7 @@ function buildReviewStatusMetaBlock(item) {
     ["Current review value", normalizeString(item.anchor.displayValue) || "(Not set)"],
     ["Days since review", Number.isFinite(item.daysSinceReview) ? String(item.daysSinceReview) : "Unknown"],
     ["Last reminder sent", formatTimestampValue(item.latestReminderAt) || "(None)"],
-    ["Last confirmation applied", formatTimestampValue(item.latestConfirmedAt) || "(None)"],
+    ["Last confirmation handled", formatTimestampValue(item.latestConfirmedAt) || "(None)"],
     ["Reminder recipients", activity.recipientEmails.length ? activity.recipientEmails.join(", ") : "(None yet)"],
     ["Outstanding sent confirmations", String(activity.sentCount)],
     ["Confirmed waiting to apply", String(activity.confirmedCount)],
@@ -4063,7 +4089,7 @@ function openRequestEditor(requestDoc) {
 
   const currentResource = resourceMeta.find(resource => resource.id === requestDoc.resourceId);
   requestSummary.appendChild(buildRequestMetaBlock(requestDoc));
-  requestSummary.appendChild(buildRequestDiffList(currentResource, requestDoc.proposedData));
+  requestSummary.appendChild(buildRequestDiffList(currentResource, requestDoc.proposedData, requestDoc));
 
   show(requestEditor);
 }
@@ -4094,6 +4120,12 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
       lastApprovedAt: serverTimestamp(),
       lastApprovedBy: actor.uid
     };
+
+    if (normalizeString(requestDoc.requestType) === "quarterly_confirmation") {
+      const confirmationDate = getValueDate(requestDoc.reviewConfirmedAt) || new Date();
+      resourcePayload["Last Verified"] = formatDateOnly(confirmationDate);
+      resourcePayload.UpdatedBy = "Quarterly review confirmation";
+    }
 
     await updateDoc(doc(db, "resources", requestDoc.resourceId), resourcePayload);
   }
