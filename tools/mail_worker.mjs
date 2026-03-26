@@ -10,6 +10,8 @@ import admin from "firebase-admin";
 const DEFAULT_LIMIT = 25;
 const SENT_RETENTION_DAYS = 183;
 const SENT_CLEANUP_SCAN_LIMIT = 200;
+const REVIEW_CONFIRMATION_RETENTION_DAYS = 365;
+const AUTH_ACTION_SCAN_LIMIT = 50;
 const args = process.argv.slice(2);
 const limitArgIndex = args.findIndex(arg => arg === "--limit");
 const limit = (() => {
@@ -254,6 +256,22 @@ async function markFailed(docId, error) {
   });
 }
 
+async function updateReviewConfirmationsFromMail(mailDoc, nextStatus, errorMessage = "") {
+  const tokenIds = Array.isArray(mailDoc?.reviewTokenIds)
+    ? mailDoc.reviewTokenIds.map(token => normalizeString(token)).filter(Boolean)
+    : [];
+  if (!tokenIds.length) return;
+
+  await Promise.all(tokenIds.map(tokenId =>
+    db.collection("review_confirmations").doc(tokenId).update({
+      status: nextStatus,
+      error: normalizeString(errorMessage),
+      sentAt: nextStatus === "sent" ? admin.firestore.FieldValue.serverTimestamp() : null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    })
+  ));
+}
+
 async function logSystemAuditEvent({
   action = "",
   entityType = "",
@@ -306,6 +324,113 @@ async function cleanupOldSentMail() {
   return staleDocs.length;
 }
 
+async function cleanupOldReviewConfirmations() {
+  const snapshot = await db.collection("review_confirmations")
+    .limit(SENT_CLEANUP_SCAN_LIMIT)
+    .get();
+
+  const staleDocs = snapshot.docs.filter(docSnap => {
+    const data = docSnap.data() || {};
+    const status = normalizeReviewConfirmationStatus(data.status);
+    if (!["applied", "expired", "failed", "confirmed", "sent"].includes(status)) return false;
+    const anchorDate = getLatestDate([
+      getValueDate(data.appliedAt),
+      getValueDate(data.confirmedAt),
+      getValueDate(data.updatedAt),
+      getValueDate(data.sentAt),
+      getValueDate(data.createdAt),
+      getValueDate(data.expiresAt)
+    ]);
+    if (!anchorDate) return false;
+    return getDaysSince(anchorDate) > REVIEW_CONFIRMATION_RETENTION_DAYS;
+  });
+
+  if (!staleDocs.length) return 0;
+
+  await Promise.all(staleDocs.map(docSnap => docSnap.ref.delete()));
+  return staleDocs.length;
+}
+
+async function processPendingAuthUserActions(limit) {
+  const snapshot = await db.collection("auth_user_actions")
+    .where("status", "==", "pending")
+    .limit(Math.min(limit, AUTH_ACTION_SCAN_LIMIT))
+    .get();
+
+  if (snapshot.empty) {
+    return { processed: 0, completed: 0, failed: 0 };
+  }
+
+  let completed = 0;
+  let failed = 0;
+
+  for (const actionDoc of snapshot.docs) {
+    const claimed = await claimStatusDoc(actionDoc.ref, "pending");
+    if (!claimed) continue;
+
+    try {
+      const uid = normalizeString(claimed.uid);
+      if (!uid) {
+        throw new Error("Auth action is missing a Firebase uid.");
+      }
+
+      try {
+        await auth.deleteUser(uid);
+      } catch (err) {
+        if (err?.code !== "auth/user-not-found") {
+          throw err;
+        }
+      }
+
+      await actionDoc.ref.update({
+        status: "completed",
+        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        error: "",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      await logSystemAuditEvent({
+        action: "auth_user.deleted",
+        entityType: "auth_user_action",
+        entityId: actionDoc.id,
+        entityLabel: normalizeString(claimed.email) || uid,
+        organizationId: normalizeString(claimed.organizationId),
+        summary: `Deleted Firebase user ${normalizeString(claimed.email) || uid}`,
+        details: {
+          uid,
+          email: normalizeString(claimed.email)
+        }
+      });
+      completed += 1;
+    } catch (error) {
+      await actionDoc.ref.update({
+        status: "failed",
+        error: normalizeString(error?.message || String(error)),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      await logSystemAuditEvent({
+        action: "auth_user.delete_failed",
+        entityType: "auth_user_action",
+        entityId: actionDoc.id,
+        entityLabel: normalizeString(claimed.email) || normalizeString(claimed.uid),
+        organizationId: normalizeString(claimed.organizationId),
+        summary: `Failed to delete Firebase user ${normalizeString(claimed.email) || normalizeString(claimed.uid) || actionDoc.id}`,
+        details: {
+          uid: normalizeString(claimed.uid),
+          email: normalizeString(claimed.email),
+          error: normalizeString(error?.message || String(error))
+        }
+      });
+      failed += 1;
+    }
+  }
+
+  return {
+    processed: snapshot.size,
+    completed,
+    failed
+  };
+}
+
 function buildInviteMessage({ inviteDoc, organizationName, setupLink }) {
   const email = normalizeString(inviteDoc.email);
   const roleLabel = normalizeString(inviteDoc.role) === "org_admin" ? "Organization Admin" : "Organization Editor";
@@ -346,9 +471,55 @@ function buildQuarterlyReminderMessage({ recipientEmail, organizationName, resou
   const subject = `[CRF] Quarterly review requested for ${organizationName || "your organization"}`;
   const intro = `It is time to review your Community Resource Finder listing${resourceEntries.length === 1 ? "" : "s"} for ${organizationName || "your organization"}.`;
 
+  const richTextToPlainText = (value) =>
+    normalizeString(String(value ?? "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<\/li>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&quot;/gi, "\"")
+      .replace(/&#39;/gi, "'")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/\s+/g, " "));
+
+  const summarizeText = (value, maxLength = 280) => {
+    const normalized = normalizeString(value);
+    if (!normalized) return "";
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+  };
+
+  const buildResourcePreviewRows = (resource) => {
+    const source = resource && typeof resource === "object" ? resource : {};
+    const websites = normalizeWebsiteList(Array.isArray(source.Websites) ? source.Websites : source.Website);
+    const phones = normalizePhoneEntries(Array.isArray(source.PhoneNumbers) ? source.PhoneNumbers : source.Phone)
+      .map(entry => getPhoneDisplayText(entry))
+      .filter(Boolean);
+    const lines = [
+      ["Short description", summarizeText(richTextToPlainText(source.Description), 240)],
+      ["Detailed description", summarizeText(richTextToPlainText(source.Notes), 320)],
+      ["Categories", normalizeStringArray(source.Categories).join(", ")],
+      ["Subcategories", normalizeStringArray(source.Subcategories).join(", ")],
+      ["Phone", phones.join(" | ")],
+      ["Website", websites.map(item => getWebsiteDisplayText(item)).filter(Boolean).join(" | ")],
+      ["Email", normalizeString(source.Email)],
+      ["Location", [normalizeString(source.Address), normalizeString(source.City), normalizeString(source.Zip)].filter(Boolean).join(", ")],
+      ["Hours", normalizeString(source.Hours)],
+      ["Eligibility", summarizeText(source.Eligibility, 220)],
+      ["Cost", summarizeText(source.Cost, 180)],
+      ["Languages", summarizeText(source.Languages, 180)]
+    ];
+
+    return lines.filter(([, value]) => normalizeString(value));
+  };
+
   const textSections = resourceEntries.map(entry => ([
     `${entry.resourceName}`,
     `Current review date: ${entry.reviewAnchorDate || "Not set"}`,
+    ...buildResourcePreviewRows(entry.resource).map(([label, value]) => `${label}: ${value}`),
     `Yes, this looks correct: ${entry.confirmUrl}`,
     `No, I need to make changes: ${loginUrl}`
   ].join("\n")));
@@ -357,6 +528,9 @@ function buildQuarterlyReminderMessage({ recipientEmail, organizationName, resou
     `<div style="margin: 0 0 16px 0; padding: 14px; border: 1px solid #dbe4ff; border-radius: 10px; background: #f8fbff;">`,
     `<p style="margin: 0 0 6px 0;"><strong>${escapeHtml(entry.resourceName)}</strong></p>`,
     `<p style="margin: 0 0 10px 0;">Current review date: ${escapeHtml(entry.reviewAnchorDate || "Not set")}</p>`,
+    ...buildResourcePreviewRows(entry.resource).map(([label, value]) =>
+      `<p style="margin: 0 0 8px 0;"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`
+    ),
     `<p style="margin: 0 0 8px 0;"><a href="${escapeHtml(entry.confirmUrl)}">Yes, this looks correct</a></p>`,
     `<p style="margin: 0;"><a href="${escapeHtml(loginUrl)}">No, I need to make changes</a></p>`,
     `</div>`
@@ -661,6 +835,7 @@ async function createQuarterlyReviewDocs({ recipient, organization, dueResources
 
     entries.push({
       token,
+      resource,
       resourceId: normalizeString(resource?.id),
       resourceName: normalizeString(resource?.Organization) || "Resource listing",
       reviewAnchorDate,
@@ -908,6 +1083,11 @@ async function processConfirmedReviewConfirmations(limit) {
 }
 
 async function main() {
+  const authActionResult = await processPendingAuthUserActions(limit);
+  if (authActionResult.processed > 0) {
+    console.log(`Processed ${authActionResult.processed} auth action(s). Completed: ${authActionResult.completed}. Failed: ${authActionResult.failed}.`);
+  }
+
   const inviteResult = await processPendingInvites(limit);
   if (inviteResult.processed > 0) {
     console.log(`Processed ${inviteResult.processed} pending invite(s). Sent: ${inviteResult.sent}. Failed: ${inviteResult.failed}.`);
@@ -930,6 +1110,7 @@ async function main() {
 
   if (snapshot.empty) {
     const deletedCount = await cleanupOldSentMail();
+    const deletedReviewCount = await cleanupOldReviewConfirmations();
     if (deletedCount > 0) {
       await logSystemAuditEvent({
         action: "mail.cleanup_deleted",
@@ -944,7 +1125,21 @@ async function main() {
       });
       console.log(`Deleted ${deletedCount} sent mail item(s) older than ${SENT_RETENTION_DAYS} days.`);
     }
-    if (inviteResult.processed === 0 && confirmationResult.processed === 0 && reminderResult.processed === 0) {
+    if (deletedReviewCount > 0) {
+      await logSystemAuditEvent({
+        action: "review.cleanup_deleted",
+        entityType: "review_confirmation",
+        entityId: "",
+        entityLabel: "",
+        summary: `Deleted ${deletedReviewCount} review confirmation item(s) older than ${REVIEW_CONFIRMATION_RETENTION_DAYS} days`,
+        details: {
+          deletedCount: deletedReviewCount,
+          retentionDays: REVIEW_CONFIRMATION_RETENTION_DAYS
+        }
+      });
+      console.log(`Deleted ${deletedReviewCount} review confirmation item(s) older than ${REVIEW_CONFIRMATION_RETENTION_DAYS} days.`);
+    }
+    if (authActionResult.processed === 0 && inviteResult.processed === 0 && confirmationResult.processed === 0 && reminderResult.processed === 0) {
       console.log("No queued mail found.");
     }
     return;
@@ -964,6 +1159,7 @@ async function main() {
       }
 
       await markSent(claimed.id, result);
+      await updateReviewConfirmationsFromMail(claimed, "sent");
       await logSystemAuditEvent({
         action: "mail.sent",
         entityType: "mail_queue",
@@ -980,6 +1176,7 @@ async function main() {
       sent += 1;
     } catch (error) {
       await markFailed(claimed.id, error);
+      await updateReviewConfirmationsFromMail(claimed, "failed", error?.message || String(error));
       await logSystemAuditEvent({
         action: "mail.failed",
         entityType: "mail_queue",
@@ -999,6 +1196,7 @@ async function main() {
 
   console.log(`Processed ${snapshot.size} queued mail item(s). Sent: ${sent}. Failed: ${failed}.`);
   const deletedCount = await cleanupOldSentMail();
+  const deletedReviewCount = await cleanupOldReviewConfirmations();
   if (deletedCount > 0) {
     await logSystemAuditEvent({
       action: "mail.cleanup_deleted",
@@ -1012,6 +1210,20 @@ async function main() {
       }
     });
     console.log(`Deleted ${deletedCount} sent mail item(s) older than ${SENT_RETENTION_DAYS} days.`);
+  }
+  if (deletedReviewCount > 0) {
+    await logSystemAuditEvent({
+      action: "review.cleanup_deleted",
+      entityType: "review_confirmation",
+      entityId: "",
+      entityLabel: "",
+      summary: `Deleted ${deletedReviewCount} review confirmation item(s) older than ${REVIEW_CONFIRMATION_RETENTION_DAYS} days`,
+      details: {
+        deletedCount: deletedReviewCount,
+        retentionDays: REVIEW_CONFIRMATION_RETENTION_DAYS
+      }
+    });
+    console.log(`Deleted ${deletedReviewCount} review confirmation item(s) older than ${REVIEW_CONFIRMATION_RETENTION_DAYS} days.`);
   }
 }
 

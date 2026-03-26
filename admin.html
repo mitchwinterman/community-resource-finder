@@ -230,9 +230,10 @@
                                     <textarea id="membership-notes-input" placeholder="Manual account setup notes"></textarea>
                                 </div>
 
-                                <div class="editor-actions">
+                            <div class="editor-actions">
                                     <button id="save-membership-btn" type="button">Save Editor</button>
                                     <button id="delete-membership-btn" type="button">Delete Editor</button>
+                                    <button id="delete-membership-user-btn" type="button" class="danger-btn">Delete Editor + Firebase User</button>
                                     <button id="cancel-membership-btn" type="button">Cancel</button>
                                 </div>
                             </div>
@@ -309,6 +310,12 @@
                     <button id="review-filter-attention" class="request-filter-tab" type="button">Admin Attention</button>
                     <button id="review-filter-current" class="request-filter-tab" type="button">Current</button>
                 </div>
+                <div class="request-bulk-actions">
+                    <label class="field-label inline-label" for="review-organization-filter">Organization</label>
+                    <select id="review-organization-filter" class="review-filter-select">
+                        <option value="">All Organizations</option>
+                    </select>
+                </div>
             </div>
 
             <div class="admin-split">
@@ -320,6 +327,7 @@
                         <div id="review-status-summary" class="request-summary"></div>
 
                         <div class="editor-actions">
+                            <button id="send-review-reminder-btn" type="button">Send Reminder Now</button>
                             <button id="open-review-resource-btn" type="button">Open Resource</button>
                             <button id="close-review-status-btn" type="button">Close</button>
                         </div>

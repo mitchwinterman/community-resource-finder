@@ -118,7 +118,7 @@ The Firebase web config is committed directly in the repository. That is normal 
 
 ## Data Model
 
-The repo currently uses nine active Firestore collections:
+The repo currently uses ten active Firestore collections:
 
 - `resources`
 - `categories`
@@ -128,6 +128,7 @@ The repo currently uses nine active Firestore collections:
 - `resource_change_requests`
 - `review_confirmations`
 - `mail_queue`
+- `auth_user_actions`
 - `audit_logs`
 
 ### `resources` Collection
@@ -367,6 +368,7 @@ Notes:
 - a `confirmed` token means the recipient clicked "Yes, everything looks correct"
 - the background worker then applies that confirmation back to the live resource by updating the existing `Last Verified` field
 - the admin `Review Status` panel reads this collection to show reminder and confirmation activity
+- the Outlook worker automatically deletes old reminder/confirmation records after roughly 1 year
 
 ### `mail_queue` Collection
 
@@ -395,9 +397,36 @@ Each document is expected to look roughly like this:
 Notes:
 
 - library admins queue these documents from the admin review workflow
+- library admins can also queue one-off quarterly reminder emails from the `Review Status` panel
 - the Windows Outlook worker in `tools/mail_worker.mjs` can process and send these documents
 - approval/rejection emails now flow through this queue
 - future invite/setup emails can reuse the same queue and sender
+
+### `auth_user_actions` Collection
+
+This collection is an admin-only operational queue for Firebase Auth actions that must be performed by the local worker.
+
+Each document is expected to look roughly like this:
+
+```json
+{
+  "action": "delete_user",
+  "status": "pending",
+  "uid": "<firebase-auth-uid>",
+  "email": "user@example.org",
+  "organizationId": "<organizations doc id>",
+  "createdAt": "<timestamp>",
+  "updatedAt": "<timestamp>",
+  "createdBy": "<admin uid>",
+  "createdByEmail": "admin@example.org",
+  "error": ""
+}
+```
+
+Notes:
+
+- the admin UI writes these docs when staff choose `Delete Editor + Firebase User`
+- the local Outlook worker also processes this queue because deleting Firebase Auth users cannot be done safely from browser code
 
 ### `audit_logs` Collection
 
@@ -800,12 +829,14 @@ The intended sender for this repo is the local Outlook Desktop worker in `tools/
 5. processes pending `editor_invites` and sends password-setup emails
 6. applies confirmed quarterly review links back to the live resource `Last Verified` field
 7. sends quarterly review reminder emails to organization primary contacts and active org editors
+8. processes pending `auth_user_actions` such as destructive Firebase-user deletion
 
 Operational queue policy:
 
 - failed mail items stay in `mail_queue` until staff retry or delete them manually
 - sent mail items can be bulk-deleted from the admin UI
 - the background worker automatically deletes sent mail items older than roughly 6 months
+- the background worker automatically deletes old `review_confirmations` records older than roughly 1 year
 
 ### Outlook Mail Worker Setup
 

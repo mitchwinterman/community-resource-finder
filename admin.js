@@ -113,6 +113,7 @@ const membershipNotesInput = document.getElementById("membership-notes-input");
 const addMembershipBtn = document.getElementById("add-membership-btn");
 const saveMembershipBtn = document.getElementById("save-membership-btn");
 const deleteMembershipBtn = document.getElementById("delete-membership-btn");
+const deleteMembershipUserBtn = document.getElementById("delete-membership-user-btn");
 const cancelMembershipBtn = document.getElementById("cancel-membership-btn");
 
 // Invites UI
@@ -141,6 +142,8 @@ const refreshReviewStatusBtn = document.getElementById("refresh-review-status-bt
 const reviewFilterDueBtn = document.getElementById("review-filter-due");
 const reviewFilterAttentionBtn = document.getElementById("review-filter-attention");
 const reviewFilterCurrentBtn = document.getElementById("review-filter-current");
+const reviewOrganizationFilter = document.getElementById("review-organization-filter");
+const sendReviewReminderBtn = document.getElementById("send-review-reminder-btn");
 const openReviewResourceBtn = document.getElementById("open-review-resource-btn");
 const closeReviewStatusBtn = document.getElementById("close-review-status-btn");
 
@@ -228,9 +231,11 @@ let editingAuditId = null;
 let editingReviewStatusId = null;
 let mailAutoRefreshHandle = null;
 let mailLoadInFlight = false;
+let reviewAutoRefreshHandle = null;
 let reviewConfirmationMeta = [];
 let reviewStatusMeta = [];
 let activeReviewFilter = "due";
+let activeReviewOrganizationFilter = "";
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -243,6 +248,7 @@ const richTextAllowedTags = ["a", "br", "em", "li", "ol", "p", "strong", "u", "u
 const richTextAllowedAttrs = ["href"];
 const REVIEW_REMINDER_DAYS = 90;
 const REVIEW_ADMIN_ATTENTION_DAYS = 365;
+const reviewRequestAccessMailto = "mailto:mwinterman@washoecounty.gov?subject=Community%20Resource%20Finder%20Editor%20Access%20Request";
 const orgEditableResourceFields = [
   "Organization",
   "Description",
@@ -309,8 +315,29 @@ function normalizeStringArray(value) {
   return value.map(item => normalizeString(item)).filter(Boolean);
 }
 
+function normalizeBaseUrl(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return "";
+
+  try {
+    const url = new URL(normalized);
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return "";
+  }
+}
+
+const publicBaseUrl = (() => {
+  const current = new URL(window.location.href);
+  if (/github\.io$/i.test(current.hostname)) {
+    return `${current.origin}${current.pathname.replace(/\/[^/]*$/, "")}`;
+  }
+  return normalizeBaseUrl(window.localStorage?.getItem("crfPublicBaseUrl"))
+    || "https://mitchwinterman.github.io/community-resource-finder";
+})();
+
 function getPortalUrl() {
-  return new URL("login.html", window.location.href).href;
+  return `${publicBaseUrl}/login.html`;
 }
 
 function parseYyyyMmDd(value) {
@@ -717,6 +744,157 @@ function getReviewConfirmationActivity(resourceId) {
     recipientEmails: Array.from(new Set(confirmations
       .map(item => normalizeString(item.recipientEmail).toLowerCase())
       .filter(Boolean)))
+  };
+}
+
+function populateReviewOrganizationFilter() {
+  if (!reviewOrganizationFilter) return;
+
+  const previousValue = normalizeString(activeReviewOrganizationFilter);
+  clearChildren(reviewOrganizationFilter);
+  reviewOrganizationFilter.appendChild(createEl("option", {
+    text: "All Organizations",
+    attrs: { value: "" }
+  }));
+
+  organizationMeta
+    .slice()
+    .sort((a, b) => getOrganizationDisplayName(a).localeCompare(getOrganizationDisplayName(b)))
+    .forEach(org => {
+      reviewOrganizationFilter.appendChild(createEl("option", {
+        text: getOrganizationDisplayName(org),
+        attrs: { value: org.id }
+      }));
+    });
+
+  reviewOrganizationFilter.value = organizationMeta.some(org => org.id === previousValue) ? previousValue : "";
+  activeReviewOrganizationFilter = normalizeString(reviewOrganizationFilter.value);
+}
+
+function getReviewReminderRecipients(organizationId) {
+  const org = organizationMeta.find(item => item.id === normalizeString(organizationId));
+  const recipients = new Map();
+
+  const primaryEmail = normalizeString(org?.primaryEmail).toLowerCase();
+  if (primaryEmail) {
+    recipients.set(primaryEmail, {
+      email: primaryEmail,
+      type: "organization_primary",
+      uid: ""
+    });
+  }
+
+  membershipMeta.forEach(member => {
+    if (normalizeString(member.organizationId) !== normalizeString(organizationId)) return;
+    if (normalizeString(member.status).toLowerCase() !== "active") return;
+
+    const email = normalizeString(member.email).toLowerCase();
+    if (!email) return;
+
+    recipients.set(email, {
+      email,
+      type: "organization_editor",
+      uid: normalizeString(member.uid || member.id)
+    });
+  });
+
+  return Array.from(recipients.values());
+}
+
+function generateReviewToken() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID().replace(/-/g, "");
+  }
+  return `${Date.now()}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+}
+
+function buildQuarterlyReminderMailPayload({ recipientEmail, organizationName, entries }) {
+  const loginUrl = getPortalUrl();
+  const intro = `It is time to review your Community Resource Finder listing${entries.length === 1 ? "" : "s"} for ${organizationName || "your organization"}.`;
+  const subject = `[CRF] Quarterly review requested for ${organizationName || "your organization"}`;
+
+  const richTextToPlainText = (value) => {
+    const cleanHtml = sanitizeRichTextHtml(value);
+    if (!cleanHtml) return "";
+
+    const template = document.createElement("template");
+    template.innerHTML = cleanHtml;
+    return normalizeString((template.content.textContent || "").replace(/\s+/g, " "));
+  };
+
+  const summarizeText = (value, maxLength = 280) => {
+    const normalized = normalizeString(value);
+    if (!normalized) return "";
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+  };
+
+  const buildResourcePreviewRows = (resource) => {
+    const source = resource && typeof resource === "object" ? resource : {};
+    const websites = normalizeWebsiteList(Array.isArray(source.Websites) ? source.Websites : source.Website);
+    const phones = normalizePhoneEntries(Array.isArray(source.PhoneNumbers) ? source.PhoneNumbers : source.Phone)
+      .map(entry => getPhoneDisplayText(entry))
+      .filter(Boolean);
+    const lines = [
+      ["Short description", summarizeText(richTextToPlainText(source.Description), 240)],
+      ["Detailed description", summarizeText(richTextToPlainText(source.Notes), 320)],
+      ["Categories", normalizeStringArray(source.Categories).join(", ")],
+      ["Subcategories", normalizeStringArray(source.Subcategories).join(", ")],
+      ["Phone", phones.join(" | ")],
+      ["Website", websites.map(item => getWebsiteDisplayText(item)).filter(Boolean).join(" | ")],
+      ["Email", normalizeString(source.Email)],
+      ["Location", [normalizeString(source.Address), normalizeString(source.City), normalizeString(source.Zip)].filter(Boolean).join(", ")],
+      ["Hours", normalizeString(source.Hours)],
+      ["Eligibility", summarizeText(source.Eligibility, 220)],
+      ["Cost", summarizeText(source.Cost, 180)],
+      ["Languages", summarizeText(source.Languages, 180)]
+    ];
+
+    return lines.filter(([, value]) => normalizeString(value));
+  };
+
+  const textSections = entries.map(entry => [
+    `${entry.resourceName}`,
+    `Current review date: ${entry.reviewAnchorDate || "Not set"}`,
+    ...buildResourcePreviewRows(entry.resource).map(([label, value]) => `${label}: ${value}`),
+    `Yes, this looks correct: ${entry.confirmUrl}`,
+    `No, I need to make changes: ${loginUrl}`
+  ].join("\n"));
+
+  const htmlSections = entries.map(entry => [
+    `<div style="margin: 0 0 16px 0; padding: 14px; border: 1px solid #dbe4ff; border-radius: 10px; background: #f8fbff;">`,
+    `<p style="margin: 0 0 6px 0;"><strong>${escapeHtml(entry.resourceName)}</strong></p>`,
+    `<p style="margin: 0 0 10px 0;">Current review date: ${escapeHtml(entry.reviewAnchorDate || "Not set")}</p>`,
+    ...buildResourcePreviewRows(entry.resource).map(([label, value]) =>
+      `<p style="margin: 0 0 8px 0;"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`
+    ),
+    `<p style="margin: 0 0 8px 0;"><a href="${escapeHtml(entry.confirmUrl)}">Yes, this looks correct</a></p>`,
+    `<p style="margin: 0;"><a href="${escapeHtml(loginUrl)}">No, I need to make changes</a></p>`,
+    `</div>`
+  ].join("")).join("");
+
+  const text = [
+    intro,
+    "",
+    ...textSections.flatMap(section => [section, ""]),
+    `If you do not already have editor access, request it here: ${reviewRequestAccessMailto}`,
+    `Organization portal: ${loginUrl}`
+  ].join("\n").trim();
+
+  const html = [
+    `<p>${escapeHtml(intro)}</p>`,
+    htmlSections,
+    `<p>If you do not already have editor access, <a href="${escapeHtml(reviewRequestAccessMailto)}">request it here</a>.</p>`,
+    `<p>You can also sign in directly at <a href="${escapeHtml(loginUrl)}">${escapeHtml(loginUrl)}</a>.</p>`
+  ].join("");
+
+  return {
+    to: recipientEmail,
+    subject,
+    text,
+    html,
+    type: "quarterly_review",
+    sourceCollection: "resources"
   };
 }
 
@@ -2034,6 +2212,7 @@ saveResourceBtn?.addEventListener("click", async () => {
     }
     hide(resourceEditor);
     await loadResources();
+    await loadReviewStatus({ preserveEditor: true });
     await loadAuditLogs();
   } catch (err) {
     console.error("Error saving resource:", err);
@@ -2061,6 +2240,7 @@ deleteResourceBtn?.addEventListener("click", async () => {
     });
     hide(resourceEditor);
     await loadResources();
+    await loadReviewStatus({ preserveEditor: true });
     await loadAuditLogs();
   } catch (err) {
     console.error("Error deleting resource:", err);
@@ -2100,6 +2280,7 @@ async function loadOrganizations() {
 
     organizations.sort((a, b) => getOrganizationDisplayName(a).localeCompare(getOrganizationDisplayName(b)));
     organizationMeta = organizations;
+    populateReviewOrganizationFilter();
     renderOrganizationList(organizations);
     refreshOrganizationMembershipSection();
   } catch (err) {
@@ -2440,6 +2621,7 @@ function openMembershipEditor(membership) {
   membershipRoleSelect.value = normalizeString(membership?.role) || "org_editor";
   membershipStatusSelect.value = normalizeString(membership?.status) || "active";
   membershipNotesInput.value = normalizeString(membership?.notes);
+  if (deleteMembershipUserBtn) deleteMembershipUserBtn.disabled = !editingMembershipId;
 
   show(membershipEditor);
 }
@@ -2500,6 +2682,36 @@ function collectInvitePayload() {
   };
 }
 
+async function queueAuthUserDeletion(membership) {
+  const actor = getCurrentActorMetadata();
+  const cleanupRef = await addDoc(collection(db, "auth_user_actions"), {
+    action: "delete_user",
+    status: "pending",
+    uid: normalizeString(membership.uid || membership.id),
+    email: normalizeString(membership.email).toLowerCase(),
+    organizationId: normalizeString(membership.organizationId),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    createdBy: actor.uid,
+    createdByEmail: actor.email,
+    error: ""
+  });
+
+  await logAuditEvent({
+    area: "access",
+    action: "membership.auth_delete_queued",
+    entityType: "auth_user_action",
+    entityId: cleanupRef.id,
+    entityLabel: normalizeString(membership.email) || normalizeString(membership.uid) || cleanupRef.id,
+    organizationId: normalizeString(membership.organizationId),
+    summary: `Queued Firebase Auth deletion for ${normalizeString(membership.email) || normalizeString(membership.uid)}`,
+    details: {
+      uid: normalizeString(membership.uid || membership.id),
+      email: normalizeString(membership.email)
+    }
+  });
+}
+
 addMembershipBtn?.addEventListener("click", () => {
   openMembershipEditor(null);
 });
@@ -2508,6 +2720,7 @@ cancelMembershipBtn?.addEventListener("click", () => {
   hide(membershipEditor);
   editingMembershipId = null;
   membershipUidInput.disabled = false;
+  if (deleteMembershipUserBtn) deleteMembershipUserBtn.disabled = true;
 });
 
 addInviteBtn?.addEventListener("click", () => {
@@ -2579,6 +2792,7 @@ saveMembershipBtn?.addEventListener("click", async () => {
     hide(membershipEditor);
     editingMembershipId = null;
     membershipUidInput.disabled = false;
+    if (deleteMembershipUserBtn) deleteMembershipUserBtn.disabled = true;
     await loadMemberships();
     await loadAuditLogs();
   } catch (err) {
@@ -2607,11 +2821,46 @@ deleteMembershipBtn?.addEventListener("click", async () => {
     hide(membershipEditor);
     editingMembershipId = null;
     membershipUidInput.disabled = false;
+    if (deleteMembershipUserBtn) deleteMembershipUserBtn.disabled = true;
     await loadMemberships();
     await loadAuditLogs();
   } catch (err) {
     console.error("Error deleting membership:", err);
     alert("Error deleting organization access. See console for details.");
+  }
+});
+
+deleteMembershipUserBtn?.addEventListener("click", async () => {
+  if (!editingMembershipId) return;
+
+  const previousMembership = membershipMeta.find(item => item.id === editingMembershipId) || {};
+  const targetLabel = normalizeString(previousMembership.email) || normalizeString(previousMembership.uid) || editingMembershipId;
+  if (!confirm(`Delete this organization access record and permanently delete the Firebase user for ${targetLabel}?`)) return;
+
+  try {
+    await queueAuthUserDeletion(previousMembership);
+    await deleteDoc(doc(db, "organization_members", editingMembershipId));
+    await logAuditEvent({
+      area: "access",
+      action: "membership.deleted",
+      entityType: "membership",
+      entityId: editingMembershipId,
+      entityLabel: targetLabel,
+      organizationId: normalizeString(previousMembership.organizationId),
+      summary: `Deleted editor access for ${targetLabel}`,
+      details: {
+        deleteFirebaseUser: true
+      }
+    });
+    hide(membershipEditor);
+    editingMembershipId = null;
+    membershipUidInput.disabled = false;
+    if (deleteMembershipUserBtn) deleteMembershipUserBtn.disabled = true;
+    await loadMemberships();
+    await loadAuditLogs();
+  } catch (err) {
+    console.error("Error deleting editor and Firebase user:", err);
+    alert("Error deleting editor and Firebase user. See console for details.");
   }
 });
 
@@ -2992,6 +3241,9 @@ function buildReviewStatusMeta() {
 
 function getFilteredReviewStatus() {
   return reviewStatusMeta.filter(item => {
+    if (activeReviewOrganizationFilter && normalizeString(item.resource.organizationId) !== activeReviewOrganizationFilter) {
+      return false;
+    }
     if (activeReviewFilter === "attention") return item.bucket === "attention";
     if (activeReviewFilter === "current") return item.bucket === "current";
     return item.bucket === "due" || item.bucket === "attention";
@@ -2999,9 +3251,12 @@ function getFilteredReviewStatus() {
 }
 
 function updateReviewFilterUi() {
-  const dueCount = reviewStatusMeta.filter(item => item.bucket === "due" || item.bucket === "attention").length;
-  const attentionCount = reviewStatusMeta.filter(item => item.bucket === "attention").length;
-  const currentCount = reviewStatusMeta.filter(item => item.bucket === "current").length;
+  const scopedItems = reviewStatusMeta.filter(item =>
+    !activeReviewOrganizationFilter || normalizeString(item.resource.organizationId) === activeReviewOrganizationFilter
+  );
+  const dueCount = scopedItems.filter(item => item.bucket === "due" || item.bucket === "attention").length;
+  const attentionCount = scopedItems.filter(item => item.bucket === "attention").length;
+  const currentCount = scopedItems.filter(item => item.bucket === "current").length;
 
   if (reviewFilterDueBtn) {
     reviewFilterDueBtn.textContent = `Due This Quarter (${dueCount})`;
@@ -3019,11 +3274,17 @@ function updateReviewFilterUi() {
   }
 }
 
-async function loadReviewStatus() {
+async function loadReviewStatus(options = {}) {
   if (!reviewStatusList) return;
 
-  hide(reviewStatusEditor);
-  editingReviewStatusId = null;
+  const { preserveEditor = true } = options;
+  const openId = editingReviewStatusId;
+  const shouldRestoreEditor = preserveEditor && !!openId;
+
+  if (!shouldRestoreEditor) {
+    hide(reviewStatusEditor);
+    editingReviewStatusId = null;
+  }
   reviewStatusList.textContent = "Loading...";
   reviewConfirmationMeta = [];
   reviewStatusMeta = [];
@@ -3042,6 +3303,16 @@ async function loadReviewStatus() {
     reviewStatusMeta = buildReviewStatusMeta();
     updateReviewFilterUi();
     renderReviewStatusList(getFilteredReviewStatus());
+
+    if (shouldRestoreEditor) {
+      const openItem = reviewStatusMeta.find(item => item.id === openId);
+      if (openItem) {
+        openReviewStatusEditor(openItem);
+      } else {
+        hide(reviewStatusEditor);
+        editingReviewStatusId = null;
+      }
+    }
   } catch (err) {
     console.error("Error loading review status:", err);
     reviewStatusList.textContent = "Error loading review status.";
@@ -3145,7 +3416,9 @@ function buildReviewStatusGuidanceBlock(item) {
 
   const guidance = item.bucket === "attention"
     ? "This listing has gone at least one year without a fresh verification. Review the record, consider direct outreach, and decide whether it should remain published."
-    : "This listing is due for its quarterly review cycle. The scheduled mail worker will send reminder emails to the organization primary email and all active org editors.";
+    : item.bucket === "current"
+      ? "This listing is currently within its quarterly review window. You can still send a manual reminder now if you want to prompt the organization early."
+      : "This listing is due for its quarterly review cycle. The scheduled mail worker will send reminder emails to the organization primary email and all active org editors.";
 
   block.appendChild(createEl("div", {
     className: "field-meta-value",
@@ -3154,15 +3427,116 @@ function buildReviewStatusGuidanceBlock(item) {
   return block;
 }
 
+async function sendManualReviewReminder() {
+  if (!editingReviewStatusId) return;
+  const item = reviewStatusMeta.find(entry => entry.id === editingReviewStatusId);
+  if (!item?.resource) return;
+
+  const recipients = getReviewReminderRecipients(item.resource.organizationId);
+  if (!recipients.length) {
+    alert("This organization has no primary email or active editor email addresses to send reminders to.");
+    return;
+  }
+
+  const organizationName = getOrganizationNameById(item.resource.organizationId) || item.organizationName;
+  const actor = getCurrentActorMetadata();
+  const reviewAnchorDate = normalizeString(item.resource["Last Verified"]) || formatDateOnly(item.anchor.date) || "";
+  const expiresAt = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000);
+  const createdMailIds = [];
+  const createdTokens = [];
+
+  try {
+    for (const recipient of recipients) {
+      const token = generateReviewToken();
+      const confirmUrl = `${publicBaseUrl}/review.html?token=${encodeURIComponent(token)}`;
+
+      await setDoc(doc(db, "review_confirmations", token), {
+        type: "quarterly_review",
+        status: "processing",
+        organizationId: normalizeString(item.resource.organizationId),
+        organizationName,
+        resourceId: normalizeString(item.resource.id),
+        resourceName: item.resourceName,
+        recipientEmail: normalizeString(recipient.email),
+        recipientType: normalizeString(recipient.type) || "organization_editor",
+        recipientUid: normalizeString(recipient.uid),
+        reviewAnchorSource: normalizeString(item.anchor.source),
+        reviewAnchorDate,
+        emailBatchId: generateReviewToken(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        sentAt: null,
+        confirmedAt: null,
+        appliedAt: null,
+        expiresAt,
+        error: ""
+      });
+      createdTokens.push(token);
+
+      const mailPayload = buildQuarterlyReminderMailPayload({
+        recipientEmail: normalizeString(recipient.email),
+        organizationName,
+        entries: [{
+          resource: item.resource,
+          resourceId: normalizeString(item.resource.id),
+          resourceName: item.resourceName,
+          reviewAnchorDate,
+          confirmUrl
+        }]
+      });
+      mailPayload.sourceId = normalizeString(item.resource.id);
+      mailPayload.reviewTokenIds = [token];
+
+      const mailRef = await addDoc(collection(db, "mail_queue"), {
+        ...mailPayload,
+        status: "queued",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      createdMailIds.push(mailRef.id);
+    }
+
+    await logAuditEvent({
+      area: "mail",
+      action: "review.reminder_queued_manual",
+      entityType: "resource",
+      entityId: normalizeString(item.resource.id),
+      entityLabel: item.resourceName,
+      organizationId: normalizeString(item.resource.organizationId),
+      relatedResourceId: normalizeString(item.resource.id),
+      summary: `Queued manual review reminder for ${item.resourceName}`,
+      details: {
+        recipientCount: recipients.length,
+        recipients: recipients.map(recipient => normalizeString(recipient.email)),
+        createdMailIds,
+        createdReviewTokens: createdTokens
+      }
+    });
+
+    await loadMailQueue({ preserveEditor: true });
+    await loadReviewStatus({ preserveEditor: true });
+    await loadAuditLogs();
+    alert(`Queued ${recipients.length} review reminder email(s) for ${item.resourceName}.`);
+  } catch (err) {
+    console.error("Error queuing manual review reminder:", err);
+    alert("Error queuing manual review reminder. See console for details.");
+  }
+}
+
 function openReviewStatusEditor(item) {
   editingReviewStatusId = item?.id || null;
   reviewStatusEditorTitle.textContent = item?.bucket === "attention"
     ? "Review Status - Admin Attention"
-    : "Review Status - Due This Quarter";
+    : item?.bucket === "current"
+      ? "Review Status - Current"
+      : "Review Status - Due This Quarter";
 
   clearChildren(reviewStatusSummary);
   reviewStatusSummary.appendChild(buildReviewStatusMetaBlock(item));
   reviewStatusSummary.appendChild(buildReviewStatusGuidanceBlock(item));
+  if (sendReviewReminderBtn) {
+    sendReviewReminderBtn.disabled = !getReviewReminderRecipients(item.resource.organizationId).length;
+  }
   show(reviewStatusEditor);
 }
 
@@ -3521,6 +3895,21 @@ function getMailSourceResource(mailDoc) {
   return null;
 }
 
+async function markLinkedReviewTokensFailed(mailDoc, reason) {
+  const tokenIds = Array.isArray(mailDoc?.reviewTokenIds)
+    ? mailDoc.reviewTokenIds.map(token => normalizeString(token)).filter(Boolean)
+    : [];
+  if (!tokenIds.length) return;
+
+  await Promise.all(tokenIds.map(tokenId =>
+    updateDoc(doc(db, "review_confirmations", tokenId), {
+      status: "failed",
+      error: normalizeString(reason),
+      updatedAt: serverTimestamp()
+    })
+  ));
+}
+
 async function retryMailItem() {
   if (!editingMailId) return;
   const mailDoc = mailMeta.find(item => item.id === editingMailId);
@@ -3563,6 +3952,7 @@ async function deleteMailItem() {
   if (!confirm("Delete this mail queue item?")) return;
 
   try {
+    await markLinkedReviewTokensFailed(mailDoc, "Mail queue item deleted by admin.");
     await deleteDoc(doc(db, "mail_queue", mailDoc.id));
     await logAuditEvent({
       area: "mail",
@@ -3599,6 +3989,9 @@ async function deleteSelectedMailItems() {
   if (!confirm(`Delete ${selectedMails.length} ${activeMailFilter} mail item(s)?`)) return;
 
   try {
+    await Promise.all(selectedMails.map(mailDoc =>
+      markLinkedReviewTokensFailed(mailDoc, "Mail queue item deleted by admin.")
+    ));
     await Promise.all(selectedMails.map(mailDoc => deleteDoc(doc(db, "mail_queue", mailDoc.id))));
     await Promise.all(selectedMails.map(mailDoc => logAuditEvent({
       area: "mail",
@@ -3651,6 +4044,14 @@ function initMailAutoRefresh() {
     if (activePanelName !== "mail" || adminScreen?.classList.contains("hidden")) return;
     await loadMailQueue({ preserveEditor: true });
   }, 15000);
+}
+
+function initReviewAutoRefresh() {
+  if (reviewAutoRefreshHandle) return;
+  reviewAutoRefreshHandle = window.setInterval(async () => {
+    if (activePanelName !== "review-status" || adminScreen?.classList.contains("hidden")) return;
+    await loadReviewStatus({ preserveEditor: true });
+  }, 30000);
 }
 
 function openRequestEditor(requestDoc) {
@@ -3768,6 +4169,7 @@ async function reviewRequest(nextStatus) {
     setRequestEditMode(false);
     await loadResources();
     await loadReviewRequests();
+    await loadReviewStatus({ preserveEditor: true });
     await loadAuditLogs();
   } catch (err) {
     console.error("Error reviewing request:", err);
@@ -3855,6 +4257,7 @@ async function applyBulkRequestAction(action) {
       setRequestEditMode(false);
     }
     await loadReviewRequests();
+    await loadReviewStatus({ preserveEditor: true });
     await loadAuditLogs();
   } catch (err) {
     console.error("Error applying bulk request action:", err);
@@ -3947,6 +4350,7 @@ closeMailBtn?.addEventListener("click", () => {
 });
 
 initMailAutoRefresh();
+initReviewAutoRefresh();
 
 refreshReviewStatusBtn?.addEventListener("click", async () => {
   await loadReviewStatus();
@@ -3962,6 +4366,22 @@ reviewFilterAttentionBtn?.addEventListener("click", () => {
 
 reviewFilterCurrentBtn?.addEventListener("click", () => {
   setActiveReviewFilter("current");
+});
+
+reviewOrganizationFilter?.addEventListener("change", async () => {
+  activeReviewOrganizationFilter = normalizeString(reviewOrganizationFilter.value);
+  updateReviewFilterUi();
+  renderReviewStatusList(getFilteredReviewStatus());
+
+  const openItem = reviewStatusMeta.find(item => item.id === editingReviewStatusId);
+  if (openItem && (!getFilteredReviewStatus().some(item => item.id === openItem.id))) {
+    hide(reviewStatusEditor);
+    editingReviewStatusId = null;
+  }
+});
+
+sendReviewReminderBtn?.addEventListener("click", async () => {
+  await sendManualReviewReminder();
 });
 
 openReviewResourceBtn?.addEventListener("click", () => {
