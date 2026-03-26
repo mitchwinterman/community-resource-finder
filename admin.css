@@ -611,6 +611,50 @@ body {
   color: #111827;
 }
 
+.inline-action-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.inline-action-link:hover {
+  filter: brightness(1.05);
+}
+
+.review-message-card {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #dbe4ff;
+  background: #f8fbff;
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.review-message-card.success {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.review-message-card.warning {
+  border-color: #fdba74;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.review-action-bar-disabled #confirm-review-btn {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .mail-status-pill.processing {
   background: #fef3c7;
   color: #92400e;

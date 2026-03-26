@@ -71,6 +71,7 @@
             <button class="nav-btn" data-panel="resources">Edit Resources</button>
             <button class="nav-btn" data-panel="categories">Edit Categories</button>
             <button class="nav-btn" data-panel="organizations">Edit Organizations</button>
+            <button class="nav-btn" data-panel="review-status">Review Status</button>
             <button class="nav-btn" data-panel="requests">Review Requests</button>
             <button class="nav-btn" data-panel="mail">Mail Queue</button>
             <button class="nav-btn" data-panel="audit">Audit Logs</button>
@@ -287,6 +288,40 @@
                             <button id="save-organization-btn">Save Organization</button>
                             <button id="delete-organization-btn">Delete Organization</button>
                             <button id="cancel-organization-btn">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- REVIEW STATUS PANEL -->
+        <div id="panel-review-status" class="panel hidden">
+
+            <div class="panel-header">
+                <h3>Review Status</h3>
+                <button id="refresh-review-status-btn" type="button">Refresh Review Status</button>
+            </div>
+
+            <div class="request-toolbar">
+                <div class="request-filter-tabs" role="tablist" aria-label="Review status filters">
+                    <button id="review-filter-due" class="request-filter-tab active" type="button">Due This Quarter</button>
+                    <button id="review-filter-attention" class="request-filter-tab" type="button">Admin Attention</button>
+                    <button id="review-filter-current" class="request-filter-tab" type="button">Current</button>
+                </div>
+            </div>
+
+            <div class="admin-split">
+                <div class="admin-list" id="review-status-list"></div>
+
+                <div class="admin-editor">
+                    <div id="review-status-editor" class="editor hidden">
+                        <h3 id="review-status-editor-title">Review Status</h3>
+                        <div id="review-status-summary" class="request-summary"></div>
+
+                        <div class="editor-actions">
+                            <button id="open-review-resource-btn" type="button">Open Resource</button>
+                            <button id="close-review-status-btn" type="button">Close</button>
                         </div>
                     </div>
                 </div>

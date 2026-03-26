@@ -77,6 +77,20 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    match /review_confirmations/{token} {
+      allow read: if isAdmin()
+        || (resource.data.type == "quarterly_review"
+          && resource.data.status in ["sent", "confirmed", "applied"]
+          && resource.data.expiresAt > request.time);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (resource.data.type == "quarterly_review"
+          && resource.data.status == "sent"
+          && resource.data.expiresAt > request.time
+          && request.resource.data.status == "confirmed"
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "confirmedAt", "updatedAt"]));
+    }
+
     match /mail_queue/{mailId} {
       allow read, create, update, delete: if isAdmin();
     }

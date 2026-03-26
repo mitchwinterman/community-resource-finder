@@ -29,6 +29,10 @@ const auth = admin.auth();
 const scriptPath = path.resolve("tools", "send_outlook_mail.ps1");
 const fromEmail = normalizeString(process.env.CRF_OUTLOOK_FROM_EMAIL);
 const publicBaseUrl = normalizeBaseUrl(process.env.CRF_PUBLIC_BASE_URL) || "https://mitchwinterman.github.io/community-resource-finder";
+const REVIEW_REMINDER_DAYS = 90;
+const FAILED_REVIEW_RETRY_HOURS = 24;
+const REVIEW_TOKEN_EXPIRATION_DAYS = 120;
+const requestAccessMailto = "mailto:mwinterman@washoecounty.gov?subject=Community%20Resource%20Finder%20Editor%20Access%20Request";
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -50,6 +54,85 @@ function normalizeBaseUrl(value) {
 function rewriteLocalUrls(content) {
   if (!publicBaseUrl || !content) return content;
   return content.replace(/https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?/gi, publicBaseUrl);
+}
+
+function parseYyyyMmDd(value) {
+  const normalized = normalizeString(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+
+  const parsed = new Date(`${normalized}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getValueDate(value) {
+  if (!value) return null;
+  if (typeof value?.toDate === "function") return value.toDate();
+  if (value instanceof Date) return value;
+
+  const normalized = normalizeString(value);
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getLatestDate(dates = []) {
+  return dates.reduce((latest, current) => {
+    if (!current) return latest;
+    if (!latest || current.getTime() > latest.getTime()) return current;
+    return latest;
+  }, null);
+}
+
+function getDaysSince(dateValue) {
+  if (!(dateValue instanceof Date)) return Number.POSITIVE_INFINITY;
+  return Math.floor((Date.now() - dateValue.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function getHoursSince(dateValue) {
+  if (!(dateValue instanceof Date)) return Number.POSITIVE_INFINITY;
+  return Math.floor((Date.now() - dateValue.getTime()) / (60 * 60 * 1000));
+}
+
+function formatLocalDate(dateValue = new Date()) {
+  const year = dateValue.getFullYear();
+  const month = `${dateValue.getMonth() + 1}`.padStart(2, "0");
+  const day = `${dateValue.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(dateValue, days) {
+  const copy = new Date(dateValue.getTime());
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function getResourceReviewAnchor(resource) {
+  const candidates = [
+    { source: "Last Verified", date: parseYyyyMmDd(resource?.["Last Verified"]) },
+    { source: "Last Approved", date: getValueDate(resource?.lastApprovedAt) },
+    { source: "Last Submitted", date: getValueDate(resource?.lastSubmittedAt) },
+    { source: "Created", date: getValueDate(resource?.createdAt) }
+  ].filter(candidate => candidate.date instanceof Date);
+
+  if (!candidates.length) {
+    return {
+      source: "",
+      date: null,
+      displayValue: ""
+    };
+  }
+
+  const latest = candidates.reduce((best, candidate) =>
+    !best || candidate.date.getTime() > best.date.getTime() ? candidate : best
+  , null);
+
+  return {
+    source: latest.source,
+    date: latest.date,
+    displayValue: latest.source === "Last Verified"
+      ? normalizeString(resource?.["Last Verified"])
+      : latest.date.toLocaleString()
+  };
 }
 
 async function claimQueuedDoc(docRef) {
@@ -258,6 +341,50 @@ function buildInviteMessage({ inviteDoc, organizationName, setupLink }) {
   };
 }
 
+function buildQuarterlyReminderMessage({ recipientEmail, organizationName, resourceEntries }) {
+  const loginUrl = `${publicBaseUrl}/login.html`;
+  const subject = `[CRF] Quarterly review requested for ${organizationName || "your organization"}`;
+  const intro = `It is time to review your Community Resource Finder listing${resourceEntries.length === 1 ? "" : "s"} for ${organizationName || "your organization"}.`;
+
+  const textSections = resourceEntries.map(entry => ([
+    `${entry.resourceName}`,
+    `Current review date: ${entry.reviewAnchorDate || "Not set"}`,
+    `Yes, this looks correct: ${entry.confirmUrl}`,
+    `No, I need to make changes: ${loginUrl}`
+  ].join("\n")));
+
+  const htmlSections = resourceEntries.map(entry => [
+    `<div style="margin: 0 0 16px 0; padding: 14px; border: 1px solid #dbe4ff; border-radius: 10px; background: #f8fbff;">`,
+    `<p style="margin: 0 0 6px 0;"><strong>${escapeHtml(entry.resourceName)}</strong></p>`,
+    `<p style="margin: 0 0 10px 0;">Current review date: ${escapeHtml(entry.reviewAnchorDate || "Not set")}</p>`,
+    `<p style="margin: 0 0 8px 0;"><a href="${escapeHtml(entry.confirmUrl)}">Yes, this looks correct</a></p>`,
+    `<p style="margin: 0;"><a href="${escapeHtml(loginUrl)}">No, I need to make changes</a></p>`,
+    `</div>`
+  ].join("")).join("");
+
+  const text = [
+    intro,
+    "",
+    ...textSections.flatMap(section => [section, ""]),
+    `If you do not already have editor access, request it here: ${requestAccessMailto}`,
+    `Organization portal: ${loginUrl}`
+  ].join("\n").trim();
+
+  const html = [
+    `<p>${escapeHtml(intro)}</p>`,
+    htmlSections,
+    `<p>If you do not already have editor access, <a href="${escapeHtml(requestAccessMailto)}">request it here</a>.</p>`,
+    `<p>You can also sign in directly at <a href="${escapeHtml(loginUrl)}">${escapeHtml(loginUrl)}</a>.</p>`
+  ].join("");
+
+  return {
+    to: recipientEmail,
+    subject,
+    text,
+    html
+  };
+}
+
 function escapeHtml(value) {
   return normalizeString(value)
     .replace(/&/g, "&amp;")
@@ -415,10 +542,385 @@ async function processPendingInvites(limit) {
   return { processed: snapshot.size, sent, failed };
 }
 
+function normalizeReviewConfirmationStatus(value) {
+  const status = normalizeString(value).toLowerCase();
+  if (["processing", "sent", "confirmed", "applied", "failed", "expired"].includes(status)) {
+    return status;
+  }
+  return "processing";
+}
+
+function getQuarterlyReviewDocsForResource(resourceId, reviewDocs) {
+  const targetId = normalizeString(resourceId);
+  if (!targetId) return [];
+  return reviewDocs.filter(doc =>
+    normalizeString(doc.resourceId) === targetId
+    && normalizeString(doc.type) === "quarterly_review"
+  );
+}
+
+function getQuarterlyReviewActivity(resourceId, reviewDocs) {
+  const docs = getQuarterlyReviewDocsForResource(resourceId, reviewDocs);
+  const latestSuccessful = getLatestDate(docs
+    .filter(doc => ["sent", "confirmed", "applied", "expired"].includes(normalizeReviewConfirmationStatus(doc.status)))
+    .map(doc => getLatestDate([
+      getValueDate(doc.appliedAt),
+      getValueDate(doc.confirmedAt),
+      getValueDate(doc.sentAt),
+      getValueDate(doc.createdAt)
+    ])));
+  const latestFailure = getLatestDate(docs
+    .filter(doc => ["failed", "processing"].includes(normalizeReviewConfirmationStatus(doc.status)))
+    .map(doc => getLatestDate([
+      getValueDate(doc.updatedAt),
+      getValueDate(doc.createdAt)
+    ])));
+
+  return {
+    latestSuccessful,
+    latestFailure
+  };
+}
+
+function isQuarterlyReviewDue(resource, reviewDocs) {
+  const anchor = getResourceReviewAnchor(resource);
+  const daysSinceAnchor = getDaysSince(anchor.date);
+  if (daysSinceAnchor < REVIEW_REMINDER_DAYS) {
+    return false;
+  }
+
+  const activity = getQuarterlyReviewActivity(resource.id, reviewDocs);
+  if (activity.latestSuccessful && getDaysSince(activity.latestSuccessful) < REVIEW_REMINDER_DAYS) {
+    return false;
+  }
+
+  if (activity.latestFailure && getHoursSince(activity.latestFailure) < FAILED_REVIEW_RETRY_HOURS) {
+    return false;
+  }
+
+  return true;
+}
+
+function collectOrganizationRecipients(organization, memberships) {
+  const recipients = new Map();
+  const primaryEmail = normalizeString(organization?.primaryEmail).toLowerCase();
+  if (primaryEmail) {
+    recipients.set(primaryEmail, {
+      email: primaryEmail,
+      type: "organization_primary",
+      uid: ""
+    });
+  }
+
+  memberships.forEach(member => {
+    const email = normalizeString(member?.email).toLowerCase();
+    if (!email || normalizeString(member?.status).toLowerCase() !== "active") return;
+
+    const existing = recipients.get(email);
+    recipients.set(email, {
+      ...(existing || {}),
+      email,
+      type: "organization_editor",
+      uid: normalizeString(member?.uid) || normalizeString(member?.id),
+      role: normalizeString(member?.role) || "org_editor"
+    });
+  });
+
+  return Array.from(recipients.values());
+}
+
+async function createQuarterlyReviewDocs({ recipient, organization, dueResources, now }) {
+  const expiresAt = admin.firestore.Timestamp.fromDate(addDays(now, REVIEW_TOKEN_EXPIRATION_DAYS));
+  const emailBatchId = randomBytes(12).toString("hex");
+  const entries = [];
+
+  for (const resource of dueResources) {
+    const token = randomBytes(24).toString("base64url");
+    const anchor = getResourceReviewAnchor(resource);
+    const reviewAnchorDate = normalizeString(resource?.["Last Verified"])
+      || formatLocalDate(anchor.date || now);
+
+    await db.collection("review_confirmations").doc(token).set({
+      type: "quarterly_review",
+      status: "processing",
+      organizationId: normalizeString(organization?.id),
+      organizationName: normalizeString(organization?.name),
+      resourceId: normalizeString(resource?.id),
+      resourceName: normalizeString(resource?.Organization),
+      recipientEmail: normalizeString(recipient?.email),
+      recipientType: normalizeString(recipient?.type) || "organization_editor",
+      recipientUid: normalizeString(recipient?.uid),
+      reviewAnchorSource: normalizeString(anchor.source),
+      reviewAnchorDate,
+      emailBatchId,
+      error: "",
+      expiresAt,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    entries.push({
+      token,
+      resourceId: normalizeString(resource?.id),
+      resourceName: normalizeString(resource?.Organization) || "Resource listing",
+      reviewAnchorDate,
+      confirmUrl: `${publicBaseUrl}/review.html?token=${encodeURIComponent(token)}`
+    });
+  }
+
+  return { emailBatchId, entries };
+}
+
+async function markQuarterlyReviewDocsStatus(tokens, status, errorMessage = "") {
+  await Promise.all(tokens.map(token =>
+    db.collection("review_confirmations").doc(token).update({
+      status,
+      error: normalizeString(errorMessage),
+      sentAt: status === "sent" ? admin.firestore.FieldValue.serverTimestamp() : null,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    })
+  ));
+}
+
+async function processQuarterlyReviewReminders(limit) {
+  const [resourceSnap, organizationSnap, membershipSnap, confirmationSnap] = await Promise.all([
+    db.collection("resources").get(),
+    db.collection("organizations").get(),
+    db.collection("organization_members").get(),
+    db.collection("review_confirmations").get()
+  ]);
+
+  const resources = resourceSnap.docs
+    .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+    .filter(resource => {
+      const status = normalizeString(resource?.status).toLowerCase();
+      return !status || status === "published";
+    });
+  const organizations = organizationSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+  const memberships = membershipSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+  const reviewDocs = confirmationSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+
+  const organizationMap = new Map(organizations.map(org => [normalizeString(org.id), org]));
+  const dueResources = resources
+    .filter(resource => isQuarterlyReviewDue(resource, reviewDocs))
+    .slice(0, limit);
+
+  if (!dueResources.length) {
+    return { processed: 0, sent: 0, failed: 0 };
+  }
+
+  const batches = [];
+  const resourcesByOrg = new Map();
+  dueResources.forEach(resource => {
+    const orgId = normalizeString(resource.organizationId);
+    if (!orgId) return;
+    if (!resourcesByOrg.has(orgId)) {
+      resourcesByOrg.set(orgId, []);
+    }
+    resourcesByOrg.get(orgId).push(resource);
+  });
+
+  resourcesByOrg.forEach((orgResources, orgId) => {
+    const organization = organizationMap.get(orgId);
+    if (!organization) return;
+    const orgMemberships = memberships.filter(member => normalizeString(member.organizationId) === orgId);
+    const recipients = collectOrganizationRecipients(organization, orgMemberships);
+
+    recipients.forEach(recipient => {
+      batches.push({
+        organization,
+        recipient,
+        dueResources: orgResources
+      });
+    });
+  });
+
+  if (!batches.length) {
+    return { processed: dueResources.length, sent: 0, failed: 0 };
+  }
+
+  let sent = 0;
+  let failed = 0;
+  const now = new Date();
+
+  for (const batch of batches) {
+    let created = null;
+
+    try {
+      created = await createQuarterlyReviewDocs({
+        recipient: batch.recipient,
+        organization: batch.organization,
+        dueResources: batch.dueResources,
+        now
+      });
+
+      const payload = buildQuarterlyReminderMessage({
+        recipientEmail: batch.recipient.email,
+        organizationName: normalizeString(batch.organization.name),
+        resourceEntries: created.entries
+      });
+      const sendResult = await sendWithOutlook(payload);
+      if (!sendResult?.ok) {
+        throw new Error(normalizeString(sendResult?.error) || "Outlook reminder send failed.");
+      }
+
+      await markQuarterlyReviewDocsStatus(created.entries.map(entry => entry.token), "sent");
+      await logSystemAuditEvent({
+        action: "review.reminder.sent",
+        entityType: "review_batch",
+        entityId: created.emailBatchId,
+        entityLabel: normalizeString(batch.organization.name),
+        organizationId: normalizeString(batch.organization.id),
+        summary: `Sent quarterly review reminder to ${batch.recipient.email}`,
+        details: {
+          recipientEmail: normalizeString(batch.recipient.email),
+          resourceIds: created.entries.map(entry => entry.resourceId),
+          resourceNames: created.entries.map(entry => entry.resourceName)
+        }
+      });
+      sent += 1;
+    } catch (error) {
+      if (created?.entries?.length) {
+        await markQuarterlyReviewDocsStatus(
+          created.entries.map(entry => entry.token),
+          "failed",
+          error?.message || String(error)
+        );
+      }
+
+      await logSystemAuditEvent({
+        action: "review.reminder.failed",
+        entityType: "review_batch",
+        entityId: normalizeString(created?.emailBatchId),
+        entityLabel: normalizeString(batch.organization.name),
+        organizationId: normalizeString(batch.organization.id),
+        summary: `Quarterly review reminder failed for ${batch.recipient.email}`,
+        details: {
+          recipientEmail: normalizeString(batch.recipient.email),
+          error: normalizeString(error?.message || String(error))
+        }
+      });
+      failed += 1;
+    }
+  }
+
+  return {
+    processed: dueResources.length,
+    sent,
+    failed
+  };
+}
+
+async function processConfirmedReviewConfirmations(limit) {
+  const snapshot = await db.collection("review_confirmations")
+    .where("status", "==", "confirmed")
+    .limit(limit)
+    .get();
+
+  if (snapshot.empty) {
+    return { processed: 0, applied: 0, failed: 0 };
+  }
+
+  let applied = 0;
+  let failed = 0;
+  const todayString = formatLocalDate(new Date());
+
+  for (const docSnap of snapshot.docs) {
+    const confirmation = { id: docSnap.id, ...docSnap.data() };
+
+    try {
+      const resourceId = normalizeString(confirmation.resourceId);
+      if (!resourceId) {
+        throw new Error("Confirmation is missing a resource id.");
+      }
+
+      await db.collection("resources").doc(resourceId).update({
+        "Last Verified": todayString,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedByUid: normalizeString(confirmation.recipientUid),
+        updatedByEmail: normalizeString(confirmation.recipientEmail),
+        UpdatedBy: "Quarterly review confirmation"
+      });
+
+      await docSnap.ref.update({
+        status: "applied",
+        appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        error: ""
+      });
+
+      const siblingSnap = await db.collection("review_confirmations")
+        .where("resourceId", "==", resourceId)
+        .get();
+      const siblingUpdates = [];
+      siblingSnap.forEach(siblingDoc => {
+        if (siblingDoc.id === docSnap.id) return;
+        const siblingData = siblingDoc.data() || {};
+        if (normalizeString(siblingData.type) !== "quarterly_review") return;
+        if (normalizeReviewConfirmationStatus(siblingData.status) !== "sent") return;
+        siblingUpdates.push(siblingDoc.ref.update({
+          status: "expired",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }));
+      });
+      if (siblingUpdates.length) {
+        await Promise.all(siblingUpdates);
+      }
+
+      await logSystemAuditEvent({
+        action: "review.confirmation_applied",
+        entityType: "review_confirmation",
+        entityId: docSnap.id,
+        entityLabel: normalizeString(confirmation.resourceName),
+        organizationId: normalizeString(confirmation.organizationId),
+        relatedResourceId: resourceId,
+        summary: `Applied quarterly review confirmation for ${normalizeString(confirmation.resourceName) || resourceId}`,
+        details: {
+          recipientEmail: normalizeString(confirmation.recipientEmail),
+          reviewDate: todayString
+        }
+      });
+      applied += 1;
+    } catch (error) {
+      await docSnap.ref.update({
+        status: "failed",
+        error: normalizeString(error?.message || String(error)),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      await logSystemAuditEvent({
+        action: "review.confirmation_failed",
+        entityType: "review_confirmation",
+        entityId: docSnap.id,
+        entityLabel: normalizeString(confirmation.resourceName),
+        organizationId: normalizeString(confirmation.organizationId),
+        relatedResourceId: normalizeString(confirmation.resourceId),
+        summary: `Quarterly review confirmation failed for ${normalizeString(confirmation.resourceName) || docSnap.id}`,
+        details: {
+          recipientEmail: normalizeString(confirmation.recipientEmail),
+          error: normalizeString(error?.message || String(error))
+        }
+      });
+      failed += 1;
+    }
+  }
+
+  return { processed: snapshot.size, applied, failed };
+}
+
 async function main() {
   const inviteResult = await processPendingInvites(limit);
   if (inviteResult.processed > 0) {
     console.log(`Processed ${inviteResult.processed} pending invite(s). Sent: ${inviteResult.sent}. Failed: ${inviteResult.failed}.`);
+  }
+
+  const confirmationResult = await processConfirmedReviewConfirmations(limit);
+  if (confirmationResult.processed > 0) {
+    console.log(`Processed ${confirmationResult.processed} confirmed review(s). Applied: ${confirmationResult.applied}. Failed: ${confirmationResult.failed}.`);
+  }
+
+  const reminderResult = await processQuarterlyReviewReminders(limit);
+  if (reminderResult.processed > 0) {
+    console.log(`Processed ${reminderResult.processed} resource(s) for quarterly reminders. Sent: ${reminderResult.sent}. Failed: ${reminderResult.failed}.`);
   }
 
   const snapshot = await db.collection("mail_queue")
@@ -442,7 +944,7 @@ async function main() {
       });
       console.log(`Deleted ${deletedCount} sent mail item(s) older than ${SENT_RETENTION_DAYS} days.`);
     }
-    if (inviteResult.processed === 0) {
+    if (inviteResult.processed === 0 && confirmationResult.processed === 0 && reminderResult.processed === 0) {
       console.log("No queued mail found.");
     }
     return;

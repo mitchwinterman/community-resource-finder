@@ -35,8 +35,10 @@ Top-level files:
 - `contact.html`: contact and resource suggestion form
 - `login.html`: unified login entry point that routes by role
 - `login.js`: role-aware login and portal routing logic
+- `review.html`: public quarterly-review confirmation page for secure email links
+- `review.js`: quarterly-review token handling and confirmation logic
 - `admin.html`: admin login and editing interface
-- `admin.js`: admin authentication and CRUD operations for resources, categories, organizations, org access, and request review
+- `admin.js`: admin authentication and CRUD operations for resources, categories, organizations, review status, mail, audit logs, and request review
 - `admin.css`: admin styling
 - `auth-routing.js`: shared role detection and redirect logic for admin and org portals
 - `org.html`: organization login and submission portal
@@ -116,7 +118,7 @@ The Firebase web config is committed directly in the repository. That is normal 
 
 ## Data Model
 
-The repo currently uses eight active Firestore collections:
+The repo currently uses nine active Firestore collections:
 
 - `resources`
 - `categories`
@@ -124,6 +126,7 @@ The repo currently uses eight active Firestore collections:
 - `organization_members`
 - `editor_invites`
 - `resource_change_requests`
+- `review_confirmations`
 - `mail_queue`
 - `audit_logs`
 
@@ -326,6 +329,44 @@ Notes:
 - org users create these docs from `org.html`
 - library admins review them in `admin.html`
 - approving a request copies `proposedData` into the live `resources` doc
+
+### `review_confirmations` Collection
+
+This collection stores secure quarterly-review confirmation links and their response lifecycle.
+
+Each document is expected to look roughly like this:
+
+```json
+{
+  "type": "quarterly_review",
+  "status": "sent",
+  "organizationId": "<organizations doc id>",
+  "organizationName": "AARP",
+  "resourceId": "<resources doc id>",
+  "resourceName": "AARP",
+  "recipientEmail": "editor@example.org",
+  "recipientType": "organization_editor",
+  "recipientUid": "<firebase-auth-uid or empty string>",
+  "reviewAnchorSource": "Last Verified",
+  "reviewAnchorDate": "2026-03-01",
+  "emailBatchId": "<batch id>",
+  "createdAt": "<timestamp>",
+  "updatedAt": "<timestamp>",
+  "sentAt": "<timestamp>",
+  "confirmedAt": null,
+  "appliedAt": null,
+  "expiresAt": "<timestamp>",
+  "error": ""
+}
+```
+
+Notes:
+
+- the document id itself acts as the secure bearer token embedded in `review.html?token=...`
+- quarterly reminder emails create one token document per resource-recipient pair
+- a `confirmed` token means the recipient clicked "Yes, everything looks correct"
+- the background worker then applies that confirmation back to the live resource by updating the existing `Last Verified` field
+- the admin `Review Status` panel reads this collection to show reminder and confirmation activity
 
 ### `mail_queue` Collection
 
@@ -748,7 +789,7 @@ A likely deployment setup is Firebase Hosting or another static host such as Git
 
 ### Outbound Mail Queue
 
-The admin review flow writes approval/rejection notifications into the `mail_queue` collection.
+The admin review flow writes approval/rejection notifications into the `mail_queue` collection, and the quarterly review system writes secure confirmation tokens into `review_confirmations`.
 
 The intended sender for this repo is the local Outlook Desktop worker in `tools/mail_worker.mjs`. That worker:
 
@@ -756,7 +797,9 @@ The intended sender for this repo is the local Outlook Desktop worker in `tools/
 2. opens the signed-in Outlook Desktop profile on a trusted Windows machine
 3. sends the message through Outlook
 4. marks the queue doc `sent` or `failed`
-5. also processes pending `editor_invites` and sends password-setup emails
+5. processes pending `editor_invites` and sends password-setup emails
+6. applies confirmed quarterly review links back to the live resource `Last Verified` field
+7. sends quarterly review reminder emails to organization primary contacts and active org editors
 
 Operational queue policy:
 
@@ -819,7 +862,7 @@ Add arguments:
 
 Recommended scheduler settings:
 
-- run every 5 minutes
+- run every 1 hour
 - run only when the user is logged on
 - use a Windows account that has the correct Outlook profile configured
 

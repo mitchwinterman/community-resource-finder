@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Quarterly Review - Community Resource Finder</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&display=swap"
+        rel="stylesheet"
+    />
+    <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+    <div class="screen">
+        <div class="topbar">
+            <div class="topbar-left">
+                <a href="https://www.washoecountylibrary.us/index.php"
+                   class="topbar-wcls-link"
+                   target="_blank"
+                   rel="noopener noreferrer">
+                    <img src="wcls-logo.png"
+                         alt="Washoe County Library System logo"
+                         class="logo-wcls-small" />
+                </a>
+            </div>
+
+            <div class="topbar-center">
+                <a href="index.html" class="topbar-crf-link">
+                    <img src="crf-logo.png"
+                         alt="Community Resource Finder logo"
+                         class="logo-crf-small" />
+                    <div class="topbar-text">
+                        <span class="topbar-title">Community Resource Finder</span>
+                        <span class="topbar-subtitle">Quarterly Review</span>
+                    </div>
+                </a>
+            </div>
+
+            <div class="topbar-right"></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <h3 id="review-page-title">Quarterly Resource Review</h3>
+            </div>
+
+            <div id="review-message" class="request-summary"></div>
+
+            <div id="review-details" class="request-summary"></div>
+
+            <div id="review-action-bar" class="editor-actions">
+                <button id="confirm-review-btn" type="button">Yes, Everything Looks Correct</button>
+                <a id="review-login-link" href="login.html" class="inline-action-link">No, I Need to Make Changes</a>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="review.js"></script>
+</body>
+</html>

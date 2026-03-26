@@ -56,6 +56,7 @@ const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const panelResources = document.getElementById("panel-resources");
 const panelCategories = document.getElementById("panel-categories");
 const panelOrganizations = document.getElementById("panel-organizations");
+const panelReviewStatus = document.getElementById("panel-review-status");
 const panelRequests = document.getElementById("panel-requests");
 const panelMail = document.getElementById("panel-mail");
 const panelAudit = document.getElementById("panel-audit");
@@ -130,6 +131,18 @@ const retryInviteBtn = document.getElementById("retry-invite-btn");
 const revokeInviteBtn = document.getElementById("revoke-invite-btn");
 const deleteInviteBtn = document.getElementById("delete-invite-btn");
 const cancelInviteBtn = document.getElementById("cancel-invite-btn");
+
+// Review status UI
+const reviewStatusList = document.getElementById("review-status-list");
+const reviewStatusEditor = document.getElementById("review-status-editor");
+const reviewStatusEditorTitle = document.getElementById("review-status-editor-title");
+const reviewStatusSummary = document.getElementById("review-status-summary");
+const refreshReviewStatusBtn = document.getElementById("refresh-review-status-btn");
+const reviewFilterDueBtn = document.getElementById("review-filter-due");
+const reviewFilterAttentionBtn = document.getElementById("review-filter-attention");
+const reviewFilterCurrentBtn = document.getElementById("review-filter-current");
+const openReviewResourceBtn = document.getElementById("open-review-resource-btn");
+const closeReviewStatusBtn = document.getElementById("close-review-status-btn");
 
 // Requests UI
 const requestList = document.getElementById("request-list");
@@ -212,8 +225,12 @@ let selectedMailIds = new Set();
 let requestEditMode = false;
 let editingMailId = null;
 let editingAuditId = null;
+let editingReviewStatusId = null;
 let mailAutoRefreshHandle = null;
 let mailLoadInFlight = false;
+let reviewConfirmationMeta = [];
+let reviewStatusMeta = [];
+let activeReviewFilter = "due";
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -224,6 +241,8 @@ const quillToolbarOptions = [
 const quillFormats = ["bold", "italic", "underline", "list", "link"];
 const richTextAllowedTags = ["a", "br", "em", "li", "ol", "p", "strong", "u", "ul"];
 const richTextAllowedAttrs = ["href"];
+const REVIEW_REMINDER_DAYS = 90;
+const REVIEW_ADMIN_ATTENTION_DAYS = 365;
 const orgEditableResourceFields = [
   "Organization",
   "Description",
@@ -288,6 +307,91 @@ function normalizeString(v) {
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
   return value.map(item => normalizeString(item)).filter(Boolean);
+}
+
+function getPortalUrl() {
+  return new URL("login.html", window.location.href).href;
+}
+
+function parseYyyyMmDd(value) {
+  const normalized = normalizeString(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+
+  const parsed = new Date(`${normalized}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getValueDate(value) {
+  if (!value) return null;
+  if (typeof value?.toDate === "function") return value.toDate();
+  if (value instanceof Date) return value;
+
+  const stringValue = normalizeString(value);
+  if (!stringValue) return null;
+  const parsed = new Date(stringValue);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getLatestDate(dates = []) {
+  return dates.reduce((latest, current) => {
+    if (!current) return latest;
+    if (!latest || current.getTime() > latest.getTime()) return current;
+    return latest;
+  }, null);
+}
+
+function formatDateOnly(value) {
+  const dateValue = value instanceof Date ? value : getValueDate(value);
+  return dateValue ? dateValue.toLocaleDateString() : "";
+}
+
+function formatDaysAgo(dateValue) {
+  if (!(dateValue instanceof Date)) return "";
+  const diffMs = Date.now() - dateValue.getTime();
+  if (diffMs < 0) return "0 days";
+  return `${Math.floor(diffMs / (24 * 60 * 60 * 1000))} days`;
+}
+
+function getResourceReviewAnchor(resource) {
+  const candidates = [
+    { source: "Last Verified", date: parseYyyyMmDd(resource?.["Last Verified"]) },
+    { source: "Last Approved", date: getValueDate(resource?.lastApprovedAt) },
+    { source: "Last Submitted", date: getValueDate(resource?.lastSubmittedAt) },
+    { source: "Created", date: getValueDate(resource?.createdAt) }
+  ].filter(candidate => candidate.date instanceof Date);
+
+  if (!candidates.length) {
+    return {
+      source: "",
+      date: null,
+      displayValue: ""
+    };
+  }
+
+  const latest = candidates.reduce((best, candidate) =>
+    !best || candidate.date.getTime() > best.date.getTime() ? candidate : best
+  , null);
+
+  return {
+    source: latest.source,
+    date: latest.date,
+    displayValue: latest.source === "Last Verified"
+      ? normalizeString(resource?.["Last Verified"])
+      : formatTimestampValue(latest.date)
+  };
+}
+
+function getDaysSinceReview(resource) {
+  const anchor = getResourceReviewAnchor(resource);
+  if (!(anchor.date instanceof Date)) return Number.POSITIVE_INFINITY;
+  return Math.floor((Date.now() - anchor.date.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function getReviewStatusBucket(resource) {
+  const daysSince = getDaysSinceReview(resource);
+  if (daysSince >= REVIEW_ADMIN_ATTENTION_DAYS) return "attention";
+  if (daysSince >= REVIEW_REMINDER_DAYS) return "due";
+  return "current";
 }
 
 function getCurrentActorMetadata() {
@@ -393,7 +497,7 @@ function buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes) {
   const requestId = normalizeString(requestDoc?.id);
   const resourceId = normalizeString(requestDoc?.resourceId);
   const reviewedAt = new Date().toLocaleString();
-  const orgPortalUrl = `${window.location.origin}/login.html`;
+  const orgPortalUrl = getPortalUrl();
   const intro = status === "approved"
     ? `Your Community Resource Finder update for "${resourceName}" has been approved.`
     : `Your Community Resource Finder update for "${resourceName}" has been rejected.`;
@@ -567,6 +671,53 @@ function getInviteSummary(invite) {
   const role = normalizeString(invite.role) || "org_editor";
   const sentAt = formatTimestampValue(invite.sentAt);
   return [role, status, sentAt].filter(Boolean).join(" | ");
+}
+
+function normalizeReviewConfirmationStatus(value) {
+  const status = normalizeString(value).toLowerCase();
+  if (["pending", "processing", "sent", "confirmed", "applied", "failed", "expired"].includes(status)) {
+    return status;
+  }
+  return "pending";
+}
+
+function getReviewConfirmationsForResource(resourceId) {
+  const targetId = normalizeString(resourceId);
+  if (!targetId) return [];
+  return reviewConfirmationMeta.filter(item =>
+    normalizeString(item.resourceId) === targetId
+    && normalizeString(item.type) === "quarterly_review"
+  );
+}
+
+function getReviewConfirmationActivity(resourceId) {
+  const confirmations = getReviewConfirmationsForResource(resourceId);
+  const latestByField = fieldName => getLatestDate(confirmations.map(item => getValueDate(item[fieldName])));
+  const latestSent = latestByField("sentAt");
+  const latestConfirmed = latestByField("confirmedAt");
+  const latestApplied = latestByField("appliedAt");
+  const latestAny = getLatestDate(confirmations.map(item =>
+    getLatestDate([
+      getValueDate(item.appliedAt),
+      getValueDate(item.confirmedAt),
+      getValueDate(item.sentAt),
+      getValueDate(item.createdAt)
+    ])
+  ));
+
+  return {
+    confirmations,
+    latestSent,
+    latestConfirmed,
+    latestApplied,
+    latestAny,
+    sentCount: confirmations.filter(item => normalizeReviewConfirmationStatus(item.status) === "sent").length,
+    confirmedCount: confirmations.filter(item => normalizeReviewConfirmationStatus(item.status) === "confirmed").length,
+    failedCount: confirmations.filter(item => normalizeReviewConfirmationStatus(item.status) === "failed").length,
+    recipientEmails: Array.from(new Set(confirmations
+      .map(item => normalizeString(item.recipientEmail).toLowerCase())
+      .filter(Boolean)))
+  };
 }
 
 function refreshOrganizationMembershipSection() {
@@ -1191,6 +1342,7 @@ onAuthStateChanged(auth, async (user) => {
   await loadMemberships();
   await loadInvites();
   await loadReviewRequests();
+  await loadReviewStatus();
   await loadMailQueue();
   await loadAuditLogs();
 });
@@ -1221,6 +1373,7 @@ function setActivePanel(panelName) {
   hide(panelResources);
   hide(panelCategories);
   hide(panelOrganizations);
+  hide(panelReviewStatus);
   hide(panelRequests);
   hide(panelMail);
   hide(panelAudit);
@@ -1232,6 +1385,12 @@ function setActivePanel(panelName) {
 
   if (panelName === "organizations") {
     show(panelOrganizations);
+    return;
+  }
+
+  if (panelName === "review-status") {
+    show(panelReviewStatus);
+    void loadReviewStatus();
     return;
   }
 
@@ -2788,6 +2947,225 @@ async function loadAuditLogs() {
   }
 }
 
+function isResourcePublished(resource) {
+  const status = normalizeString(resource?.status).toLowerCase();
+  return !status || status === "published";
+}
+
+function buildReviewStatusMeta() {
+  return resourceMeta
+    .filter(resource => isResourcePublished(resource))
+    .map(resource => {
+      const anchor = getResourceReviewAnchor(resource);
+      const daysSinceReview = getDaysSinceReview(resource);
+      const bucket = getReviewStatusBucket(resource);
+      const activity = getReviewConfirmationActivity(resource.id);
+
+      return {
+        id: resource.id,
+        resource,
+        resourceName: getResourceDisplayName(resource),
+        organizationName: getOrganizationNameById(resource.organizationId) || "(Unknown organization)",
+        anchor,
+        daysSinceReview,
+        bucket,
+        latestReminderAt: activity.latestSent || activity.latestAny || null,
+        latestConfirmedAt: activity.latestApplied || activity.latestConfirmed || null,
+        recipientEmails: activity.recipientEmails,
+        sentCount: activity.sentCount,
+        confirmedCount: activity.confirmedCount,
+        failedCount: activity.failedCount
+      };
+    })
+    .sort((a, b) => {
+      const bucketRank = value => {
+        if (value === "attention") return 0;
+        if (value === "due") return 1;
+        return 2;
+      };
+      const rankDelta = bucketRank(a.bucket) - bucketRank(b.bucket);
+      if (rankDelta !== 0) return rankDelta;
+      if (a.daysSinceReview !== b.daysSinceReview) return b.daysSinceReview - a.daysSinceReview;
+      return a.resourceName.localeCompare(b.resourceName);
+    });
+}
+
+function getFilteredReviewStatus() {
+  return reviewStatusMeta.filter(item => {
+    if (activeReviewFilter === "attention") return item.bucket === "attention";
+    if (activeReviewFilter === "current") return item.bucket === "current";
+    return item.bucket === "due" || item.bucket === "attention";
+  });
+}
+
+function updateReviewFilterUi() {
+  const dueCount = reviewStatusMeta.filter(item => item.bucket === "due" || item.bucket === "attention").length;
+  const attentionCount = reviewStatusMeta.filter(item => item.bucket === "attention").length;
+  const currentCount = reviewStatusMeta.filter(item => item.bucket === "current").length;
+
+  if (reviewFilterDueBtn) {
+    reviewFilterDueBtn.textContent = `Due This Quarter (${dueCount})`;
+    reviewFilterDueBtn.classList.toggle("active", activeReviewFilter === "due");
+  }
+
+  if (reviewFilterAttentionBtn) {
+    reviewFilterAttentionBtn.textContent = `Admin Attention (${attentionCount})`;
+    reviewFilterAttentionBtn.classList.toggle("active", activeReviewFilter === "attention");
+  }
+
+  if (reviewFilterCurrentBtn) {
+    reviewFilterCurrentBtn.textContent = `Current (${currentCount})`;
+    reviewFilterCurrentBtn.classList.toggle("active", activeReviewFilter === "current");
+  }
+}
+
+async function loadReviewStatus() {
+  if (!reviewStatusList) return;
+
+  hide(reviewStatusEditor);
+  editingReviewStatusId = null;
+  reviewStatusList.textContent = "Loading...";
+  reviewConfirmationMeta = [];
+  reviewStatusMeta = [];
+
+  try {
+    const snap = await getDocs(collection(db, "review_confirmations"));
+    const confirmations = [];
+    snap.forEach(ds => {
+      confirmations.push({
+        id: ds.id,
+        ...ds.data()
+      });
+    });
+
+    reviewConfirmationMeta = confirmations;
+    reviewStatusMeta = buildReviewStatusMeta();
+    updateReviewFilterUi();
+    renderReviewStatusList(getFilteredReviewStatus());
+  } catch (err) {
+    console.error("Error loading review status:", err);
+    reviewStatusList.textContent = "Error loading review status.";
+  }
+}
+
+function setActiveReviewFilter(nextFilter) {
+  activeReviewFilter = ["attention", "current"].includes(nextFilter) ? nextFilter : "due";
+  const openItem = reviewStatusMeta.find(item => item.id === editingReviewStatusId);
+  if (openItem && !getFilteredReviewStatus().some(item => item.id === openItem.id)) {
+    hide(reviewStatusEditor);
+    editingReviewStatusId = null;
+  }
+  updateReviewFilterUi();
+  renderReviewStatusList(getFilteredReviewStatus());
+}
+
+function getReviewStatusSummaryText(item) {
+  const anchorSource = normalizeString(item.anchor.source) || "No review date";
+  const anchorValue = normalizeString(item.anchor.displayValue) || "Unknown";
+  const days = Number.isFinite(item.daysSinceReview) ? `${item.daysSinceReview} days` : "Unknown";
+  return `${item.organizationName} | ${anchorSource}: ${anchorValue} | ${days}`;
+}
+
+function renderReviewStatusList(items) {
+  clearChildren(reviewStatusList);
+
+  if (!items.length) {
+    reviewStatusList.textContent = activeReviewFilter === "attention"
+      ? "No resources currently need admin attention."
+      : activeReviewFilter === "current"
+        ? "No current published resources were found."
+        : "No resources are currently due for quarterly review.";
+    return;
+  }
+
+  items.forEach(item => {
+    const badgeText = item.bucket === "attention"
+      ? "needs attention"
+      : item.bucket === "current"
+        ? "current"
+        : "due";
+    const badgeClass = item.bucket === "attention"
+      ? "rejected"
+      : item.bucket === "current"
+        ? "approved"
+        : "pending";
+
+    const row = createEl("div", { className: "list-row list-row-stacked" });
+    row.appendChild(createEl("div", {
+      className: "list-row-title",
+      text: item.resourceName || "(Unnamed resource)"
+    }));
+    row.appendChild(createEl("div", {
+      className: "list-row-meta",
+      text: getReviewStatusSummaryText(item)
+    }));
+    row.appendChild(createEl("span", {
+      className: `request-status-pill ${badgeClass}`,
+      text: badgeText
+    }));
+    row.addEventListener("click", () => openReviewStatusEditor(item));
+    reviewStatusList.appendChild(row);
+  });
+}
+
+function buildReviewStatusMetaBlock(item) {
+  const activity = getReviewConfirmationActivity(item.id);
+  const block = createEl("div", { className: "request-block" });
+  block.appendChild(createEl("h4", { text: "Review Summary" }));
+
+  const metaList = createEl("div", { className: "request-meta-list" });
+  const rows = [
+    ["Resource", item.resourceName || "(Unnamed resource)"],
+    ["Organization", item.organizationName],
+    ["Current review source", normalizeString(item.anchor.source) || "(None)"],
+    ["Current review value", normalizeString(item.anchor.displayValue) || "(Not set)"],
+    ["Days since review", Number.isFinite(item.daysSinceReview) ? String(item.daysSinceReview) : "Unknown"],
+    ["Last reminder sent", formatTimestampValue(item.latestReminderAt) || "(None)"],
+    ["Last confirmation applied", formatTimestampValue(item.latestConfirmedAt) || "(None)"],
+    ["Reminder recipients", activity.recipientEmails.length ? activity.recipientEmails.join(", ") : "(None yet)"],
+    ["Outstanding sent confirmations", String(activity.sentCount)],
+    ["Confirmed waiting to apply", String(activity.confirmedCount)],
+    ["Failed reminder sends", String(activity.failedCount)]
+  ];
+
+  rows.forEach(([label, value]) => {
+    const row = createEl("div", { className: "request-meta-row" });
+    row.appendChild(createEl("strong", { text: label }));
+    row.appendChild(createEl("span", { text: value }));
+    metaList.appendChild(row);
+  });
+
+  block.appendChild(metaList);
+  return block;
+}
+
+function buildReviewStatusGuidanceBlock(item) {
+  const block = createEl("div", { className: "request-block" });
+  block.appendChild(createEl("h4", { text: item.bucket === "attention" ? "Admin Attention" : "Next Steps" }));
+
+  const guidance = item.bucket === "attention"
+    ? "This listing has gone at least one year without a fresh verification. Review the record, consider direct outreach, and decide whether it should remain published."
+    : "This listing is due for its quarterly review cycle. The scheduled mail worker will send reminder emails to the organization primary email and all active org editors.";
+
+  block.appendChild(createEl("div", {
+    className: "field-meta-value",
+    text: guidance
+  }));
+  return block;
+}
+
+function openReviewStatusEditor(item) {
+  editingReviewStatusId = item?.id || null;
+  reviewStatusEditorTitle.textContent = item?.bucket === "attention"
+    ? "Review Status - Admin Attention"
+    : "Review Status - Due This Quarter";
+
+  clearChildren(reviewStatusSummary);
+  reviewStatusSummary.appendChild(buildReviewStatusMetaBlock(item));
+  reviewStatusSummary.appendChild(buildReviewStatusGuidanceBlock(item));
+  show(reviewStatusEditor);
+}
+
 function renderRequestList(requests) {
   clearChildren(requestList);
 
@@ -3569,6 +3947,35 @@ closeMailBtn?.addEventListener("click", () => {
 });
 
 initMailAutoRefresh();
+
+refreshReviewStatusBtn?.addEventListener("click", async () => {
+  await loadReviewStatus();
+});
+
+reviewFilterDueBtn?.addEventListener("click", () => {
+  setActiveReviewFilter("due");
+});
+
+reviewFilterAttentionBtn?.addEventListener("click", () => {
+  setActiveReviewFilter("attention");
+});
+
+reviewFilterCurrentBtn?.addEventListener("click", () => {
+  setActiveReviewFilter("current");
+});
+
+openReviewResourceBtn?.addEventListener("click", () => {
+  if (!editingReviewStatusId) return;
+  const item = reviewStatusMeta.find(entry => entry.id === editingReviewStatusId);
+  if (!item?.resource) return;
+  setActivePanel("resources");
+  openResourceEditor(item.resource.id, item.resource);
+});
+
+closeReviewStatusBtn?.addEventListener("click", () => {
+  hide(reviewStatusEditor);
+  editingReviewStatusId = null;
+});
 
 refreshAuditBtn?.addEventListener("click", async () => {
   await loadAuditLogs();
