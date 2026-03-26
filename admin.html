@@ -237,6 +237,52 @@
                             </div>
                         </div>
 
+                        <div class="embedded-section">
+                            <div class="embedded-section-header">
+                                <h4>Editor Invites</h4>
+                                <button id="add-invite-btn" type="button">+ Add Invite</button>
+                            </div>
+                            <p id="invite-section-helper" class="section-helper">Save this organization first, then create setup invites for editor accounts.</p>
+                            <div class="admin-list embedded-list" id="invite-list"></div>
+
+                            <div id="invite-editor" class="editor embedded-editor hidden">
+                                <h4 id="invite-editor-title">Create Editor Invite</h4>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="invite-email-input">Invite Email</label>
+                                    <input id="invite-email-input" type="email" placeholder="user@example.org" />
+                                </div>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="invite-role-select">Role</label>
+                                    <select id="invite-role-select">
+                                        <option value="org_editor">Org Editor</option>
+                                        <option value="org_admin">Org Admin</option>
+                                    </select>
+                                </div>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="invite-custom-message-input">Custom Message</label>
+                                    <textarea id="invite-custom-message-input" placeholder="Optional note to include in the setup email"></textarea>
+                                </div>
+
+                                <div class="field-group">
+                                    <label class="field-label" for="invite-notes-input">Internal Notes</label>
+                                    <textarea id="invite-notes-input" placeholder="Internal notes about this invite"></textarea>
+                                </div>
+
+                                <div id="invite-meta-fields"></div>
+
+                                <div class="editor-actions">
+                                    <button id="save-invite-btn" type="button">Save Invite</button>
+                                    <button id="retry-invite-btn" type="button">Retry Invite</button>
+                                    <button id="revoke-invite-btn" type="button">Revoke Invite</button>
+                                    <button id="delete-invite-btn" type="button" class="danger-btn">Delete Invite</button>
+                                    <button id="cancel-invite-btn" type="button">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="editor-actions">
                             <button id="save-organization-btn">Save Organization</button>
                             <button id="delete-organization-btn">Delete Organization</button>

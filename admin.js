@@ -114,6 +114,23 @@ const saveMembershipBtn = document.getElementById("save-membership-btn");
 const deleteMembershipBtn = document.getElementById("delete-membership-btn");
 const cancelMembershipBtn = document.getElementById("cancel-membership-btn");
 
+// Invites UI
+const inviteList = document.getElementById("invite-list");
+const inviteEditor = document.getElementById("invite-editor");
+const inviteEditorTitle = document.getElementById("invite-editor-title");
+const inviteSectionHelper = document.getElementById("invite-section-helper");
+const inviteEmailInput = document.getElementById("invite-email-input");
+const inviteRoleSelect = document.getElementById("invite-role-select");
+const inviteCustomMessageInput = document.getElementById("invite-custom-message-input");
+const inviteNotesInput = document.getElementById("invite-notes-input");
+const inviteMetaFields = document.getElementById("invite-meta-fields");
+const addInviteBtn = document.getElementById("add-invite-btn");
+const saveInviteBtn = document.getElementById("save-invite-btn");
+const retryInviteBtn = document.getElementById("retry-invite-btn");
+const revokeInviteBtn = document.getElementById("revoke-invite-btn");
+const deleteInviteBtn = document.getElementById("delete-invite-btn");
+const cancelInviteBtn = document.getElementById("cancel-invite-btn");
+
 // Requests UI
 const requestList = document.getElementById("request-list");
 const requestEditor = document.getElementById("request-editor");
@@ -174,12 +191,14 @@ let editingResourceId = null;
 let editingCategoryId = null;
 let editingOrganizationId = null;
 let editingMembershipId = null;
+let editingInviteId = null;
 let editingRequestId = null;
 let editingResourceData = null;
 let categoryMeta = [];
 let organizationMeta = [];
 let resourceMeta = [];
 let membershipMeta = [];
+let inviteMeta = [];
 let requestMeta = [];
 let mailMeta = [];
 let auditMeta = [];
@@ -521,6 +540,35 @@ function getMembershipsForOrganization(organizationId) {
   return membershipMeta.filter(item => normalizeString(item.organizationId) === targetId);
 }
 
+function normalizeInviteStatus(value) {
+  const status = normalizeString(value).toLowerCase();
+  if (["pending", "processing", "sent", "accepted", "failed", "revoked"].includes(status)) return status;
+  return "pending";
+}
+
+function getInviteStatusLabel(value) {
+  const status = normalizeInviteStatus(value);
+  if (status === "processing") return "processing";
+  if (status === "sent") return "sent";
+  if (status === "accepted") return "accepted";
+  if (status === "failed") return "failed";
+  if (status === "revoked") return "revoked";
+  return "pending";
+}
+
+function getInvitesForOrganization(organizationId) {
+  const targetId = normalizeString(organizationId);
+  if (!targetId) return [];
+  return inviteMeta.filter(item => normalizeString(item.organizationId) === targetId);
+}
+
+function getInviteSummary(invite) {
+  const status = getInviteStatusLabel(invite.status);
+  const role = normalizeString(invite.role) || "org_editor";
+  const sentAt = formatTimestampValue(invite.sentAt);
+  return [role, status, sentAt].filter(Boolean).join(" | ");
+}
+
 function refreshOrganizationMembershipSection() {
   if (!membershipList || !membershipSectionHelper || !addMembershipBtn) return;
 
@@ -536,6 +584,23 @@ function refreshOrganizationMembershipSection() {
   addMembershipBtn.disabled = false;
   membershipSectionHelper.textContent = "Users in this list can sign in and submit updates for this organization.";
   renderMembershipList(getMembershipsForOrganization(editingOrganizationId));
+}
+
+function refreshOrganizationInviteSection() {
+  if (!inviteList || !inviteSectionHelper || !addInviteBtn) return;
+
+  if (!editingOrganizationId) {
+    hide(inviteEditor);
+    editingInviteId = null;
+    addInviteBtn.disabled = true;
+    inviteSectionHelper.textContent = "Save this organization first, then create setup invites for editor accounts.";
+    inviteList.textContent = "";
+    return;
+  }
+
+  addInviteBtn.disabled = false;
+  inviteSectionHelper.textContent = "Invites create or link an editor account, then email a one-time password setup link.";
+  renderInviteList(getInvitesForOrganization(editingOrganizationId));
 }
 
 function formatJsonBlock(value) {
@@ -1124,6 +1189,7 @@ onAuthStateChanged(auth, async (user) => {
   await loadCategories();
   await loadResources();
   await loadMemberships();
+  await loadInvites();
   await loadReviewRequests();
   await loadMailQueue();
   await loadAuditLogs();
@@ -1915,6 +1981,10 @@ function openOrganizationEditor(org) {
   editingMembershipId = null;
   membershipUidInput.disabled = false;
   refreshOrganizationMembershipSection();
+  hide(inviteEditor);
+  editingInviteId = null;
+  inviteEmailInput.disabled = false;
+  refreshOrganizationInviteSection();
   show(organizationEditor);
 }
 
@@ -1940,6 +2010,10 @@ cancelOrganizationBtn?.addEventListener("click", () => {
   editingMembershipId = null;
   membershipUidInput.disabled = false;
   refreshOrganizationMembershipSection();
+  hide(inviteEditor);
+  editingInviteId = null;
+  inviteEmailInput.disabled = false;
+  refreshOrganizationInviteSection();
 });
 
 saveOrganizationBtn?.addEventListener("click", async () => {
@@ -2004,6 +2078,7 @@ saveOrganizationBtn?.addEventListener("click", async () => {
     await loadOrganizations();
     await loadResources();
     await loadMemberships();
+    await loadInvites();
     await loadReviewRequests();
     await loadAuditLogs();
   } catch (err) {
@@ -2023,6 +2098,11 @@ deleteOrganizationBtn?.addEventListener("click", async () => {
   const attachedMemberships = membershipMeta.filter(item => normalizeString(item.organizationId) === editingOrganizationId);
   if (attachedMemberships.length > 0) {
     alert(`Cannot delete this organization while ${attachedMemberships.length} authorized editor record(s) still reference it.`);
+    return;
+  }
+  const attachedInvites = inviteMeta.filter(item => normalizeString(item.organizationId) === editingOrganizationId && normalizeInviteStatus(item.status) !== "revoked");
+  if (attachedInvites.length > 0) {
+    alert(`Cannot delete this organization while ${attachedInvites.length} invite record(s) still reference it.`);
     return;
   }
 
@@ -2045,6 +2125,7 @@ deleteOrganizationBtn?.addEventListener("click", async () => {
     await loadOrganizations();
     await loadResources();
     await loadMemberships();
+    await loadInvites();
     await loadReviewRequests();
     await loadAuditLogs();
   } catch (err) {
@@ -2090,6 +2171,52 @@ async function loadMemberships() {
   }
 }
 
+async function loadInvites() {
+  if (!inviteList) return;
+
+  hide(inviteEditor);
+  editingInviteId = null;
+  inviteList.textContent = editingOrganizationId ? "Loading..." : "";
+  inviteMeta = [];
+
+  try {
+    const snap = await getDocs(collection(db, "editor_invites"));
+    const invites = [];
+
+    snap.forEach(ds => {
+      const data = ds.data() || {};
+      invites.push({
+        id: ds.id,
+        email: normalizeString(data.email),
+        organizationId: normalizeString(data.organizationId),
+        role: normalizeString(data.role) || "org_editor",
+        customMessage: normalizeString(data.customMessage),
+        notes: normalizeString(data.notes),
+        status: normalizeInviteStatus(data.status),
+        firebaseUid: normalizeString(data.firebaseUid),
+        setupLink: normalizeString(data.setupLink),
+        error: normalizeString(data.error),
+        sentAt: data.sentAt || null,
+        acceptedAt: data.acceptedAt || null,
+        createdAt: data.createdAt || null,
+        updatedAt: data.updatedAt || null
+      });
+    });
+
+    invites.sort((a, b) => {
+      const aTime = a.updatedAt?.seconds || a.createdAt?.seconds || 0;
+      const bTime = b.updatedAt?.seconds || b.createdAt?.seconds || 0;
+      return bTime - aTime;
+    });
+
+    inviteMeta = invites;
+    refreshOrganizationInviteSection();
+  } catch (err) {
+    console.error("Error loading invites:", err);
+    inviteList.textContent = "Error loading invites.";
+  }
+}
+
 function renderMembershipList(memberships) {
   clearChildren(membershipList);
 
@@ -2113,6 +2240,33 @@ function renderMembershipList(memberships) {
   });
 }
 
+function renderInviteList(invites) {
+  clearChildren(inviteList);
+
+  if (!invites.length) {
+    inviteList.textContent = "No invites yet.";
+    return;
+  }
+
+  invites.forEach(invite => {
+    const row = createEl("div", { className: "list-row list-row-stacked" });
+    row.appendChild(createEl("div", {
+      className: "list-row-title",
+      text: normalizeString(invite.email) || "(Unnamed invite)"
+    }));
+    row.appendChild(createEl("div", {
+      className: "list-row-meta",
+      text: getInviteSummary(invite)
+    }));
+    row.appendChild(createEl("span", {
+      className: `request-status-pill mail-status-pill ${normalizeInviteStatus(invite.status)}`,
+      text: getInviteStatusLabel(invite.status)
+    }));
+    row.addEventListener("click", () => openInviteEditor(invite));
+    inviteList.appendChild(row);
+  });
+}
+
 function openMembershipEditor(membership) {
   if (!editingOrganizationId) {
     alert("Save the organization first, then add authorized editors.");
@@ -2131,6 +2285,41 @@ function openMembershipEditor(membership) {
   show(membershipEditor);
 }
 
+function renderInviteMeta(invite) {
+  clearChildren(inviteMetaFields);
+
+  if (!invite) return;
+
+  inviteMetaFields.appendChild(buildReadOnlyMetaField("Status", getInviteStatusLabel(invite.status)));
+  inviteMetaFields.appendChild(buildReadOnlyMetaField("Firebase UID", normalizeString(invite.firebaseUid) || "-"));
+  inviteMetaFields.appendChild(buildReadOnlyMetaField("Sent", formatTimestampValue(invite.sentAt)));
+  inviteMetaFields.appendChild(buildReadOnlyMetaField("Accepted", formatTimestampValue(invite.acceptedAt)));
+  inviteMetaFields.appendChild(buildReadOnlyMetaField("Last Error", normalizeString(invite.error) || "-"));
+}
+
+function openInviteEditor(invite) {
+  if (!editingOrganizationId) {
+    alert("Save the organization first, then create editor invites.");
+    return;
+  }
+
+  editingInviteId = invite?.id || null;
+  inviteEditorTitle.textContent = editingInviteId ? "Edit Editor Invite" : "Create Editor Invite";
+  inviteEmailInput.value = normalizeString(invite?.email);
+  inviteRoleSelect.value = normalizeString(invite?.role) || "org_editor";
+  inviteCustomMessageInput.value = normalizeString(invite?.customMessage);
+  inviteNotesInput.value = normalizeString(invite?.notes);
+  inviteEmailInput.disabled = Boolean(editingInviteId);
+
+  const status = normalizeInviteStatus(invite?.status);
+  retryInviteBtn.disabled = !editingInviteId || !["failed", "revoked"].includes(status);
+  revokeInviteBtn.disabled = !editingInviteId || ["accepted", "revoked"].includes(status);
+  deleteInviteBtn.disabled = !editingInviteId;
+
+  renderInviteMeta(invite || null);
+  show(inviteEditor);
+}
+
 function collectMembershipPayload() {
   return {
     uid: normalizeString(membershipUidInput.value),
@@ -2142,6 +2331,16 @@ function collectMembershipPayload() {
   };
 }
 
+function collectInvitePayload() {
+  return {
+    email: normalizeString(inviteEmailInput.value).toLowerCase(),
+    organizationId: normalizeString(editingOrganizationId),
+    role: normalizeString(inviteRoleSelect.value) || "org_editor",
+    customMessage: normalizeString(inviteCustomMessageInput.value),
+    notes: normalizeString(inviteNotesInput.value)
+  };
+}
+
 addMembershipBtn?.addEventListener("click", () => {
   openMembershipEditor(null);
 });
@@ -2150,6 +2349,16 @@ cancelMembershipBtn?.addEventListener("click", () => {
   hide(membershipEditor);
   editingMembershipId = null;
   membershipUidInput.disabled = false;
+});
+
+addInviteBtn?.addEventListener("click", () => {
+  openInviteEditor(null);
+});
+
+cancelInviteBtn?.addEventListener("click", () => {
+  hide(inviteEditor);
+  editingInviteId = null;
+  inviteEmailInput.disabled = false;
 });
 
 saveMembershipBtn?.addEventListener("click", async () => {
@@ -2244,6 +2453,185 @@ deleteMembershipBtn?.addEventListener("click", async () => {
   } catch (err) {
     console.error("Error deleting membership:", err);
     alert("Error deleting organization access. See console for details.");
+  }
+});
+
+saveInviteBtn?.addEventListener("click", async () => {
+  const payload = collectInvitePayload();
+  if (!editingOrganizationId) {
+    alert("Save the organization first, then create editor invites.");
+    return;
+  }
+  if (!payload.email) {
+    alert("Invite email is required.");
+    return;
+  }
+
+  const duplicatePending = inviteMeta.find(invite =>
+    invite.id !== editingInviteId &&
+    normalizeString(invite.organizationId) === payload.organizationId &&
+    normalizeString(invite.email).toLowerCase() === payload.email &&
+    !["revoked"].includes(normalizeInviteStatus(invite.status))
+  );
+
+  if (duplicatePending) {
+    alert("An active invite already exists for that email on this organization.");
+    return;
+  }
+
+  const actor = getCurrentActorMetadata();
+  const isNew = !editingInviteId;
+  const basePayload = {
+    ...payload,
+    updatedAt: serverTimestamp(),
+    updatedBy: actor.uid,
+    updatedByEmail: actor.email
+  };
+
+  try {
+    if (editingInviteId) {
+      const existingInvite = inviteMeta.find(item => item.id === editingInviteId) || {};
+      await updateDoc(doc(db, "editor_invites", editingInviteId), {
+        ...basePayload,
+        status: ["accepted", "sent", "processing"].includes(normalizeInviteStatus(existingInvite.status))
+          ? normalizeInviteStatus(existingInvite.status)
+          : "pending",
+        error: ""
+      });
+      await logAuditEvent({
+        area: "access",
+        action: "invite.updated",
+        entityType: "editor_invite",
+        entityId: editingInviteId,
+        entityLabel: payload.email,
+        organizationId: payload.organizationId,
+        summary: `Updated invite for ${payload.email}`,
+        details: {
+          changedFields: getChangedFieldNames(existingInvite, payload, ["role", "customMessage", "notes"])
+        }
+      });
+    } else {
+      const createdRef = await addDoc(collection(db, "editor_invites"), {
+        ...basePayload,
+        status: "pending",
+        firebaseUid: "",
+        setupLink: "",
+        error: "",
+        sentAt: null,
+        acceptedAt: null,
+        createdAt: serverTimestamp(),
+        createdBy: actor.uid,
+        createdByEmail: actor.email
+      });
+      await logAuditEvent({
+        area: "access",
+        action: "invite.created",
+        entityType: "editor_invite",
+        entityId: createdRef.id,
+        entityLabel: payload.email,
+        organizationId: payload.organizationId,
+        summary: `Created invite for ${payload.email}`,
+        details: {
+          role: payload.role
+        }
+      });
+    }
+
+    hide(inviteEditor);
+    editingInviteId = null;
+    inviteEmailInput.disabled = false;
+    await loadInvites();
+    await loadAuditLogs();
+  } catch (err) {
+    console.error("Error saving invite:", err);
+    alert("Error saving editor invite. See console for details.");
+  }
+});
+
+retryInviteBtn?.addEventListener("click", async () => {
+  if (!editingInviteId) return;
+  const invite = inviteMeta.find(item => item.id === editingInviteId);
+  if (!invite) return;
+
+  try {
+    await updateDoc(doc(db, "editor_invites", editingInviteId), {
+      status: "pending",
+      error: "",
+      updatedAt: serverTimestamp()
+    });
+    await logAuditEvent({
+      area: "access",
+      action: "invite.requeued",
+      entityType: "editor_invite",
+      entityId: editingInviteId,
+      entityLabel: normalizeString(invite.email),
+      organizationId: normalizeString(invite.organizationId),
+      summary: `Requeued invite for ${normalizeString(invite.email) || editingInviteId}`,
+      details: {}
+    });
+    await loadInvites();
+    await loadAuditLogs();
+  } catch (err) {
+    console.error("Error retrying invite:", err);
+    alert("Error retrying invite. See console for details.");
+  }
+});
+
+revokeInviteBtn?.addEventListener("click", async () => {
+  if (!editingInviteId) return;
+  const invite = inviteMeta.find(item => item.id === editingInviteId);
+  if (!invite) return;
+  if (!confirm("Revoke this invite?")) return;
+
+  try {
+    await updateDoc(doc(db, "editor_invites", editingInviteId), {
+      status: "revoked",
+      updatedAt: serverTimestamp()
+    });
+    await logAuditEvent({
+      area: "access",
+      action: "invite.revoked",
+      entityType: "editor_invite",
+      entityId: editingInviteId,
+      entityLabel: normalizeString(invite.email),
+      organizationId: normalizeString(invite.organizationId),
+      summary: `Revoked invite for ${normalizeString(invite.email) || editingInviteId}`,
+      details: {}
+    });
+    await loadInvites();
+    await loadAuditLogs();
+  } catch (err) {
+    console.error("Error revoking invite:", err);
+    alert("Error revoking invite. See console for details.");
+  }
+});
+
+deleteInviteBtn?.addEventListener("click", async () => {
+  if (!editingInviteId) return;
+  const invite = inviteMeta.find(item => item.id === editingInviteId);
+  if (!invite) return;
+  if (!confirm("Delete this invite?")) return;
+
+  try {
+    await deleteDoc(doc(db, "editor_invites", editingInviteId));
+    await logAuditEvent({
+      area: "access",
+      action: "invite.deleted",
+      entityType: "editor_invite",
+      entityId: editingInviteId,
+      entityLabel: normalizeString(invite.email),
+      organizationId: normalizeString(invite.organizationId),
+      summary: `Deleted invite for ${normalizeString(invite.email) || editingInviteId}`,
+      details: {}
+    });
+    hide(inviteEditor);
+    editingInviteId = null;
+    inviteEmailInput.disabled = false;
+    await loadInvites();
+    await loadAuditLogs();
+  } catch (err) {
+    console.error("Error deleting invite:", err);
+    alert("Error deleting invite. See console for details.");
   }
 });
 

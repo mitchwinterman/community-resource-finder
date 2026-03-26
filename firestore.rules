@@ -50,6 +50,24 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    match /editor_invites/{inviteId} {
+      allow read: if isAdmin()
+        || (hasActiveMembership()
+          && resource.data.organizationId == memberOrganizationId()
+          && request.auth.token.email == resource.data.email);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (hasActiveMembership()
+          && resource.data.organizationId == memberOrganizationId()
+          && request.auth.token.email == resource.data.email
+          && resource.data.status == "sent"
+          && request.resource.data.organizationId == resource.data.organizationId
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.status == "accepted"
+          && request.resource.data.firebaseUid == request.auth.uid
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(["status", "firebaseUid", "acceptedAt", "updatedAt"]));
+    }
+
     match /resource_change_requests/{requestId} {
       allow read: if isAdmin() || (hasActiveMembership() && resource.data.organizationId == memberOrganizationId());
       allow create: if hasActiveMembership()

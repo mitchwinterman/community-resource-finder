@@ -116,12 +116,13 @@ The Firebase web config is committed directly in the repository. That is normal 
 
 ## Data Model
 
-The repo currently uses seven active Firestore collections:
+The repo currently uses eight active Firestore collections:
 
 - `resources`
 - `categories`
 - `organizations`
 - `organization_members`
+- `editor_invites`
 - `resource_change_requests`
 - `mail_queue`
 - `audit_logs`
@@ -261,6 +262,38 @@ Notes:
 - the document id should match the Firebase Auth `uid`
 - this is what grants an org user access to `org.html`
 - the current implementation assumes one organization per org-user account
+
+### `editor_invites` Collection
+
+Each document in `editor_invites` is expected to look roughly like this:
+
+```json
+{
+  "email": "user@example.org",
+  "organizationId": "<organizations doc id>",
+  "role": "org_editor",
+  "customMessage": "Optional custom note from library staff",
+  "notes": "Internal notes",
+  "status": "pending",
+  "firebaseUid": "",
+  "setupLink": "",
+  "error": "",
+  "sentAt": null,
+  "acceptedAt": null,
+  "createdAt": "<timestamp>",
+  "createdBy": "<uid>",
+  "createdByEmail": "admin@example.org",
+  "updatedAt": "<timestamp>",
+  "updatedBy": "<uid>",
+  "updatedByEmail": "admin@example.org"
+}
+```
+
+Notes:
+
+- library admins create and manage these docs from the Organizations panel
+- the local Outlook worker creates or links the Firebase Auth account, upserts `organization_members`, generates a password setup link, and sends the invite email
+- first successful org-portal access marks matching `sent` invites as `accepted`
 
 ### `resource_change_requests` Collection
 
@@ -723,8 +756,7 @@ The intended sender for this repo is the local Outlook Desktop worker in `tools/
 2. opens the signed-in Outlook Desktop profile on a trusted Windows machine
 3. sends the message through Outlook
 4. marks the queue doc `sent` or `failed`
-
-The same queue can later be reused for org-editor invite/setup emails.
+5. also processes pending `editor_invites` and sends password-setup emails
 
 Operational queue policy:
 
@@ -742,6 +774,7 @@ Requirements:
 - Outlook configured and signed in with the mailbox you want to send from
 - access to the Firebase service account JSON for this project
 - Node.js installed locally
+- the production site domain added to Firebase Authentication authorized domains
 
 Optional environment variables:
 
@@ -796,6 +829,7 @@ Operational notes:
 - if your Windows password or Microsoft 365 password changes, the worker should continue sending after Outlook itself has been reauthenticated
 - the wrapper script defaults `CRF_PUBLIC_BASE_URL` to `https://mitchwinterman.github.io/community-resource-finder`
 - this worker is intended for a trusted internal machine, not an end-user workstation
+- Firebase Auth password setup links will only return cleanly to your public site if `mitchwinterman.github.io` is listed under Firebase Authentication authorized domains
 
 ### Production Checklist
 

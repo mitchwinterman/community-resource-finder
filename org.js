@@ -6,6 +6,7 @@ import {
   getDocs,
   addDoc,
   query,
+  updateDoc,
   where,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -347,6 +348,40 @@ async function loadRequests() {
   });
   requestMeta = requests;
   renderRequestList(requests);
+}
+
+async function markMatchingInvitesAccepted() {
+  const email = normalizeString(auth.currentUser?.email).toLowerCase();
+  const organizationId = normalizeString(membershipDoc?.organizationId);
+  if (!email || !organizationId) return;
+
+  const snap = await getDocs(query(
+    collection(db, "editor_invites"),
+    where("organizationId", "==", organizationId),
+    where("email", "==", email),
+    where("status", "==", "sent")
+  ));
+
+  if (snap.empty) return;
+
+  await Promise.all(snap.docs.map(async ds => {
+    await updateDoc(doc(db, "editor_invites", ds.id), {
+      status: "accepted",
+      firebaseUid: auth.currentUser?.uid || "",
+      acceptedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    await logOrgAuditEvent({
+      action: "invite.accepted",
+      entityType: "editor_invite",
+      entityId: ds.id,
+      entityLabel: email,
+      organizationId,
+      summary: `Accepted invite for ${email}`,
+      details: {}
+    });
+  }));
 }
 
 function renderResourceList(resources) {
@@ -844,6 +879,7 @@ onAuthStateChanged(auth, async user => {
 
     membershipDoc = profile.membership;
     await loadOrganizationForMembership(membershipDoc);
+    await markMatchingInvitesAccepted();
     await loadCategories();
     await loadRequests();
     await loadOwnedResources();
