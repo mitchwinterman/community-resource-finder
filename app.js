@@ -131,6 +131,7 @@ let selectedResourceId = null;
 let currentResultSet = [];
 let activeRightPanel = "details";
 let activeMapScope = "selected";
+let leafletMap = null;
 let activeFilters = {
     search: "",
     category: "all",
@@ -426,6 +427,15 @@ function createTextBlock(tagName, className, text) {
     return el;
 }
 
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 function updateRightPanelToggleUi() {
     const selectedScope = activeMapScope === "selected";
     const isDetails = activeRightPanel === "details";
@@ -457,48 +467,234 @@ function getMappableResources(resources) {
     });
 }
 
-function renderMapPlaceholder() {
-    renderDetailsShell();
+function destroyLeafletMap() {
+    if (leafletMap) {
+        leafletMap.remove();
+        leafletMap = null;
+    }
+}
 
-    const panel = document.createElement("div");
-    panel.className = "map-placeholder";
+function getLeafletLibrary() {
+    return window.L || null;
+}
+
+function createMapInfoMessage(titleText, bodyText) {
+    const wrap = document.createElement("div");
+    wrap.className = "map-empty-state";
+    wrap.appendChild(createTextBlock("div", "map-empty-title", titleText));
+    wrap.appendChild(createTextBlock("div", "map-empty-copy", bodyText));
+    return wrap;
+}
+
+function createMarkerPopupHtml(resource) {
+    const name = escapeHtml(normalizeString(resource?.Organization) || "No name");
+    const address = escapeHtml([
+        normalizeString(resource?.Address),
+        normalizeString(resource?.City),
+        normalizeString(resource?.Zip)
+    ].filter(Boolean).join(", "));
+    return `
+        <div class="map-popup">
+            <strong>${name}</strong>
+            ${address ? `<div>${address}</div>` : ""}
+        </div>
+    `;
+}
+
+function updateSelectedResultCardState(resourceId) {
+    const cards = document.querySelectorAll(".result-card");
+    cards.forEach(card => {
+        card.style.background = "#f7f9ff";
+        card.style.borderLeft = "none";
+        card.setAttribute("aria-pressed", "false");
+
+        if (card.dataset.resourceId === normalizeString(resourceId)) {
+            card.style.background = "#eef2ff";
+            card.style.borderLeft = "4px solid #6a7cff";
+            card.setAttribute("aria-pressed", "true");
+        }
+    });
+}
+
+function scrollResultCardIntoView(resourceId) {
+    const card = resultsDiv?.querySelector(`.result-card[data-resource-id="${normalizeString(resourceId)}"]`);
+    card?.scrollIntoView({
+        block: "nearest",
+        behavior: "smooth"
+    });
+}
+
+function renderMapView() {
+    renderDetailsShell();
+    destroyLeafletMap();
+
+    const L = getLeafletLibrary();
+    if (!L) {
+        rightPanelContent.appendChild(createMapInfoMessage(
+            "Map library unavailable",
+            "Leaflet did not load, so the map cannot be shown right now."
+        ));
+        return;
+    }
 
     const isResultsScope = activeMapScope === "results";
     const selectedResource = currentResultSet.find(resource => normalizeString(resource.id) === selectedResourceId);
-    panel.appendChild(createTextBlock(
-        "div",
-        "map-placeholder-title",
-        isResultsScope ? "All-results map will appear here." : "Selected-resource map will appear here."
-    ));
-    panel.appendChild(createTextBlock(
-        "div",
-        "map-placeholder-copy",
-        isResultsScope
-            ? "This panel is now reserved for the full filtered-results map. The next step will replace this placeholder with the actual Leaflet map and markers for every mappable result on the left."
-            : "This panel is now ready for the selected resource map. The next step will replace this placeholder with the actual Leaflet map centered on the currently selected resource."
-    ));
-
-    const stats = document.createElement("div");
-    stats.className = "map-placeholder-stats";
     const mappableResources = getMappableResources(currentResultSet);
-    stats.appendChild(createTextBlock("div", "map-placeholder-stat", `${currentResultSet.length} current result${currentResultSet.length === 1 ? "" : "s"}`));
-    stats.appendChild(createTextBlock("div", "map-placeholder-stat", `${mappableResources.length} currently mappable`));
-    if (!isResultsScope && selectedResource) {
-        const selectedMappable = getMappableResources([selectedResource]).length === 1 ? "selected resource has coordinates" : "selected resource not yet mappable";
-        stats.appendChild(createTextBlock("div", "map-placeholder-stat", selectedMappable));
-    }
-    panel.appendChild(stats);
-    panel.appendChild(createTextBlock(
+
+    const panel = document.createElement("div");
+    panel.className = "map-view-panel";
+
+    const summary = document.createElement("div");
+    summary.className = "map-view-summary";
+    summary.appendChild(createTextBlock(
         "div",
-        "map-placeholder-note",
-        isResultsScope
-            ? "This mode will map all currently filtered and included results."
-            : selectedResource
-                ? `Selected resource: ${normalizeString(selectedResource.Organization) || "No name"}`
-                : "Select a result on the left to keep the future list and map behavior aligned."
+        "map-view-title",
+        isResultsScope ? "All Results Map" : "Selected Resource Map"
     ));
 
+    if (isResultsScope) {
+        const stats = document.createElement("div");
+        stats.className = "map-view-stats";
+        stats.appendChild(createTextBlock("div", "map-view-stat", `${currentResultSet.length} current result${currentResultSet.length === 1 ? "" : "s"}`));
+        stats.appendChild(createTextBlock("div", "map-view-stat", `${mappableResources.length} currently mappable`));
+        summary.appendChild(stats);
+        summary.appendChild(createTextBlock(
+            "div",
+            "map-view-note",
+            "This mode maps all currently filtered and included results."
+        ));
+    } else {
+        summary.appendChild(createTextBlock(
+            "div",
+            "map-view-note",
+            selectedResource
+                ? `Showing: ${normalizeString(selectedResource.Organization) || "No name"}`
+                : "Select a result on the left to view that resource on the map."
+        ));
+    }
+    panel.appendChild(summary);
+
+    if (isResultsScope && !mappableResources.length) {
+        rightPanelContent.appendChild(panel);
+        panel.appendChild(createMapInfoMessage(
+            "No mappable results",
+            "None of the currently filtered results have coordinates and are included in the map."
+        ));
+        return;
+    }
+
+    if (!isResultsScope && !selectedResource) {
+        rightPanelContent.appendChild(panel);
+        panel.appendChild(createMapInfoMessage(
+            "Select a resource first",
+            "Choose a result on the left to view a map for that resource."
+        ));
+        return;
+    }
+
+    if (!isResultsScope && !getMappableResources([selectedResource]).length) {
+        rightPanelContent.appendChild(panel);
+        panel.appendChild(createMapInfoMessage(
+            "This resource is not mappable yet",
+            "The selected resource either has no coordinates yet or has been marked as not included in the map."
+        ));
+        return;
+    }
+
+    const mapCanvas = document.createElement("div");
+    mapCanvas.className = "leaflet-map-canvas";
+    panel.appendChild(mapCanvas);
     rightPanelContent.appendChild(panel);
+
+    const defaultMapCenter = [39.5296, -119.8138];
+
+    leafletMap = L.map(mapCanvas, {
+        zoomControl: true,
+        scrollWheelZoom: true
+    }).setView(defaultMapCenter, 10);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(leafletMap);
+
+    const bounds = [];
+
+    if (isResultsScope) {
+        const markers = [];
+
+        const applyMarkerSelectionState = () => {
+            markers.forEach(({ id, marker }) => {
+                const isSelected = normalizeString(id) === selectedResourceId;
+                marker.setStyle({
+                    radius: isSelected ? 9 : 7,
+                    color: isSelected ? "#0f172a" : "#2563eb",
+                    weight: 2,
+                    fillColor: isSelected ? "#0ea5e9" : "#60a5fa",
+                    fillOpacity: 0.9
+                });
+            });
+        };
+
+        mappableResources.forEach(resource => {
+            const lat = Number.parseFloat(normalizeString(resource.Latitude));
+            const lon = Number.parseFloat(normalizeString(resource.Longitude));
+            const isSelected = normalizeString(resource.id) === selectedResourceId;
+            const marker = L.circleMarker([lat, lon], {
+                radius: isSelected ? 9 : 7,
+                color: isSelected ? "#0f172a" : "#2563eb",
+                weight: 2,
+                fillColor: isSelected ? "#0ea5e9" : "#60a5fa",
+                fillOpacity: 0.9
+            }).addTo(leafletMap);
+
+            marker.bindPopup(createMarkerPopupHtml(resource));
+            markers.push({
+                id: resource.id,
+                marker
+            });
+            marker.on("click", () => {
+                selectedResourceId = normalizeString(resource.id);
+                activeMapScope = "selected";
+                activeRightPanel = "map";
+                scrollResultCardIntoView(selectedResourceId);
+                refreshRightPanel({
+                    focusPanel: false,
+                    updateHistory: true
+                });
+            });
+
+            bounds.push([lat, lon]);
+        });
+
+        applyMarkerSelectionState();
+    } else if (selectedResource) {
+        const lat = Number.parseFloat(normalizeString(selectedResource.Latitude));
+        const lon = Number.parseFloat(normalizeString(selectedResource.Longitude));
+        const marker = L.marker([lat, lon]).addTo(leafletMap);
+        marker.bindPopup(createMarkerPopupHtml(selectedResource)).openPopup();
+        bounds.push([lat, lon]);
+    }
+
+    window.setTimeout(() => {
+        if (!leafletMap) return;
+        leafletMap.invalidateSize();
+
+        if (bounds.length === 1) {
+            leafletMap.setView(bounds[0], 13);
+            return;
+        }
+
+        if (bounds.length > 1) {
+            leafletMap.fitBounds(bounds, {
+                padding: [32, 32]
+            });
+            return;
+        }
+
+        leafletMap.setView(defaultMapCenter, 10);
+    }, 50);
+
 }
 
 function refreshRightPanel(options = {}) {
@@ -506,7 +702,7 @@ function refreshRightPanel(options = {}) {
     const selectedResource = currentResultSet.find(resource => normalizeString(resource.id) === selectedResourceId);
 
     if (activeMapScope === "results" || activeRightPanel === "map") {
-        renderMapPlaceholder();
+        renderMapView();
         if (updateHistory) updateUrlState();
         if (focusPanel) detailsDiv?.focus();
         return;
@@ -526,6 +722,7 @@ function refreshRightPanel(options = {}) {
 
 function renderDetailsEmptyState() {
     renderDetailsShell();
+    destroyLeafletMap();
 
     const empty = createTextBlock("div", "details-empty", "Select a resource");
     empty.appendChild(document.createElement("br"));
@@ -713,24 +910,12 @@ function renderResults(resources) {
 
 function showDetails(resource, options = {}) {
     const { focusDetails = true, updateHistory = true } = options;
-    const cards = document.querySelectorAll(".result-card");
     const resourceId = normalizeString(resource?.id);
-
-    cards.forEach(card => {
-        card.style.background = "#f7f9ff";
-        card.style.borderLeft = "none";
-        card.setAttribute("aria-pressed", "false");
-
-        if (card.dataset.resourceId === resourceId) {
-            card.style.background = "#eef2ff";
-            card.style.borderLeft = "4px solid #6a7cff";
-            card.setAttribute("aria-pressed", "true");
-        }
-    });
+    updateSelectedResultCardState(resourceId);
 
     selectedResourceId = resourceId;
     if (activeMapScope === "results" || activeRightPanel === "map") {
-        renderMapPlaceholder();
+        renderMapView();
         if (updateHistory) {
             updateUrlState();
         }
@@ -741,6 +926,7 @@ function showDetails(resource, options = {}) {
     }
 
     renderDetailsShell();
+    destroyLeafletMap();
     rightPanelContent.appendChild(
         createTextBlock("div", "details-title", normalizeString(resource.Organization) || "No name")
     );
@@ -772,6 +958,7 @@ function showDetails(resource, options = {}) {
 }
 
 function showError(message) {
+    destroyLeafletMap();
     currentResultSet = [];
     globalData = [];
     selectedResourceId = null;
@@ -832,6 +1019,8 @@ function resetAll() {
         subcategory: "all"
     };
     selectedResourceId = null;
+    activeMapScope = "selected";
+    activeRightPanel = "details";
     void applyFilters();
 }
 
