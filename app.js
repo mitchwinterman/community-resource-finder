@@ -15,22 +15,59 @@ import {
     where
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// -----------------------------
-// Data loaders (Firestore)
-// -----------------------------
-async function loadData() {
+async function loadDataForFilters(filters = {}) {
+    const category = normalizeString(filters.category).toLowerCase();
+    const subcategory = normalizeString(filters.subcategory).toLowerCase();
+    const categoryQueryValue = getStoredCategoryValue(category);
+    const subcategoryQueryValue = getStoredSubcategoryValue(category, subcategory);
+
+    const constraints = [where("status", "==", "published")];
+    if (subcategoryQueryValue) {
+        constraints.push(where("Subcategories", "array-contains", subcategoryQueryValue));
+    } else if (categoryQueryValue) {
+        constraints.push(where("Categories", "array-contains", categoryQueryValue));
+    }
+
     try {
-        const snap = await getDocs(query(
-            collection(db, "resources"),
-            where("status", "==", "published")
-        ));
+        const snap = await getDocs(query(collection(db, "resources"), ...constraints));
         const list = [];
         snap.forEach(docSnap => {
-            list.push(docSnap.data());
+            list.push({
+                id: docSnap.id,
+                ...docSnap.data()
+            });
         });
+
+        if (!list.length && (subcategoryQueryValue || categoryQueryValue)) {
+            const fallbackSnap = await getDocs(query(
+                collection(db, "resources"),
+                where("status", "==", "published")
+            ));
+            const fallbackList = [];
+            fallbackSnap.forEach(docSnap => {
+                const data = {
+                    id: docSnap.id,
+                    ...docSnap.data()
+                };
+                const categories = normalizeStringArray(data.Categories).map(normalizeTaxonomyMatchValue);
+                const subcategories = normalizeStringArray(data.Subcategories).map(normalizeTaxonomyMatchValue);
+                const normalizedCategory = normalizeTaxonomyMatchValue(category);
+                const normalizedSubcategory = normalizeTaxonomyMatchValue(subcategory);
+
+                if (subcategory !== "all") {
+                    if (!subcategories.includes(normalizedSubcategory)) return;
+                } else if (category !== "all") {
+                    if (!categories.includes(normalizedCategory)) return;
+                }
+
+                fallbackList.push(data);
+            });
+            return fallbackList;
+        }
+
         return list;
     } catch (err) {
-        console.error("DATA LOAD ERROR (Firestore resources):", err);
+        console.error("FILTERED DATA LOAD ERROR (Firestore resources):", err);
         showError("Error loading resources.");
         return [];
     }
@@ -60,8 +97,7 @@ const searchInput = document.getElementById("searchBox");
 const categorySelect = document.getElementById("categorySelect");
 const subcategorySelect = document.getElementById("subcategorySelect");
 const resetButton = document.getElementById("resetButton");
-const titleEl = document.getElementById("app-title");
-const brandHomeEl = document.getElementById("brand-home");
+const brandHomeLink = document.querySelector(".brand-home-link");
 
 const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
@@ -74,6 +110,14 @@ let globalData = [];
 let categoryOptions = [];
 let subcategoryOptions = {};
 let selectedResourceId = null;
+let currentResultSet = [];
+let activeFilters = {
+    search: "",
+    category: "all",
+    subcategory: "all"
+};
+let latestLoadRequestId = 0;
+const resourceQueryCache = new Map();
 
 // -----------------------------
 // HELPER FUNCTIONS
@@ -121,6 +165,20 @@ function normalizeStringArray(value) {
     return value.map(item => normalizeString(item)).filter(Boolean);
 }
 
+function normalizeFilterValue(value) {
+    const normalized = normalizeString(value).toLowerCase();
+    return normalized || "all";
+}
+
+function normalizeTaxonomyMatchValue(value) {
+    return normalizeString(value)
+        .toLowerCase()
+        .replace(/&/g, " and ")
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
 function isResourcePublished(resource) {
     const status = normalizeString(resource?.status).toLowerCase();
     return !status || status === "published";
@@ -135,6 +193,63 @@ function formatSubcategoryLabel(label) {
 function clearElement(el) {
     if (!el) return;
     el.replaceChildren();
+}
+
+function renderDetailsShell() {
+    clearElement(detailsDiv);
+    detailsDiv.appendChild(createTextBlock("h2", "panel-heading", "Resource Details"));
+}
+
+function buildResourceQueryCacheKey(categoryFilter, subcategoryFilter) {
+    const category = normalizeFilterValue(categoryFilter);
+    const subcategory = normalizeFilterValue(subcategoryFilter);
+    return `category:${category}|subcategory:${subcategory}`;
+}
+
+function getStoredCategoryValue(categoryValue) {
+    const normalized = normalizeFilterValue(categoryValue);
+    if (normalized === "all") return "";
+    const match = categoryOptions.find(option => option.value === normalized);
+    return normalizeString(match?.raw || "");
+}
+
+function getStoredSubcategoryValue(categoryValue, subcategoryValue) {
+    const normalizedCategory = normalizeFilterValue(categoryValue);
+    const normalizedSubcategory = normalizeFilterValue(subcategoryValue);
+    if (normalizedCategory === "all" || normalizedSubcategory === "all") return "";
+    const options = subcategoryOptions[normalizedCategory] || [];
+    const match = options.find(option => option.value === normalizedSubcategory);
+    return normalizeString(match?.raw || "");
+}
+
+function getUrlState() {
+    const params = new URLSearchParams(window.location.search);
+    const search = normalizeString(params.get("q"));
+    const category = normalizeFilterValue(params.get("c"));
+    const subcategory = normalizeFilterValue(params.get("s"));
+    const selectedId = normalizeString(params.get("id"));
+    return {
+        search,
+        category,
+        subcategory: category === "all" ? "all" : subcategory,
+        selectedId
+    };
+}
+
+function updateUrlState() {
+    const params = new URLSearchParams();
+    if (activeFilters.search) params.set("q", activeFilters.search);
+    if (activeFilters.category !== "all") params.set("c", activeFilters.category);
+    if (activeFilters.subcategory !== "all" && activeFilters.category !== "all") {
+        params.set("s", activeFilters.subcategory);
+    }
+    if (selectedResourceId) params.set("id", selectedResourceId);
+
+    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+    window.history.replaceState({
+        ...activeFilters,
+        selectedId: selectedResourceId
+    }, "", nextUrl);
 }
 
 function getPlainText(value) {
@@ -261,13 +376,13 @@ function createTextBlock(tagName, className, text) {
 }
 
 function renderDetailsEmptyState() {
-    clearElement(detailsDiv);
+    renderDetailsShell();
 
     const empty = createTextBlock("div", "details-empty", "Select a resource");
     empty.appendChild(document.createElement("br"));
 
     const small = document.createElement("small");
-    small.textContent = "Use the search bar or filters above to find a resource, then click to view full details.";
+    small.textContent = "Use the search bar or filters above to find a resource, then select it to view full details.";
     empty.appendChild(small);
 
     detailsDiv.appendChild(empty);
@@ -275,7 +390,9 @@ function renderDetailsEmptyState() {
 
 function renderStatusCard(container, message) {
     clearElement(container);
-    container.appendChild(createTextBlock("div", "result-card", message));
+    const status = createTextBlock("div", "result-card result-status-card", message);
+    status.setAttribute("role", "status");
+    container.appendChild(status);
 }
 
 function appendDetailField(label, value, options = {}) {
@@ -382,15 +499,6 @@ function appendDetailListField(label, values, options = {}) {
     detailsDiv.appendChild(field);
 }
 
-function getResourceSelectionKey(resource) {
-    return [
-        normalizeString(resource.Organization),
-        normalizeString(resource.Address),
-        getResourcePhoneNumbers(resource).map(getPhoneDisplayText).join(" | "),
-        getResourceWebsites(resource).join(" | ")
-    ].join("|");
-}
-
 function sortByOrganizationInPlace(list) {
     list.sort((a, b) => {
         const nameA = normalizeString(a.Organization).toLowerCase();
@@ -408,20 +516,24 @@ function updateResultCount(count) {
 
 function renderResults(resources) {
     clearElement(resultsDiv);
-    renderDetailsEmptyState();
-    selectedResourceId = null;
+    currentResultSet = Array.isArray(resources) ? resources.slice() : [];
 
     updateResultCount(resources.length);
 
     if (resources.length === 0) {
+        selectedResourceId = null;
         renderStatusCard(resultsDiv, "No results found.");
+        renderDetailsEmptyState();
+        updateUrlState();
         return;
     }
 
     resources.forEach(resource => {
-        const card = document.createElement("div");
+        const card = document.createElement("button");
+        card.type = "button";
         card.className = "result-card";
-        card.dataset.resourceKey = getResourceSelectionKey(resource);
+        card.dataset.resourceId = normalizeString(resource.id);
+        card.setAttribute("aria-pressed", normalizeString(resource.id) === selectedResourceId ? "true" : "false");
 
         const title = document.createElement("div");
         title.className = "card-title";
@@ -438,28 +550,39 @@ function renderResults(resources) {
 
         card.appendChild(title);
         card.appendChild(description);
-        card.onclick = () => showDetails(resource);
+        card.addEventListener("click", () => showDetails(resource));
         resultsDiv.appendChild(card);
     });
+
+    const selectedResource = resources.find(resource => normalizeString(resource.id) === selectedResourceId);
+    if (selectedResource) {
+        showDetails(selectedResource, { focusDetails: false, updateHistory: false });
+    } else {
+        selectedResourceId = null;
+        renderDetailsEmptyState();
+        updateUrlState();
+    }
 }
 
-function showDetails(resource) {
+function showDetails(resource, options = {}) {
+    const { focusDetails = true, updateHistory = true } = options;
     const cards = document.querySelectorAll(".result-card");
-    const resourceKey = getResourceSelectionKey(resource);
+    const resourceId = normalizeString(resource?.id);
 
     cards.forEach(card => {
         card.style.background = "#f7f9ff";
         card.style.borderLeft = "none";
+        card.setAttribute("aria-pressed", "false");
 
-        if (card.dataset.resourceKey === resourceKey) {
+        if (card.dataset.resourceId === resourceId) {
             card.style.background = "#eef2ff";
             card.style.borderLeft = "4px solid #6a7cff";
+            card.setAttribute("aria-pressed", "true");
         }
     });
 
-    selectedResourceId = resourceKey;
-
-    clearElement(detailsDiv);
+    selectedResourceId = resourceId;
+    renderDetailsShell();
     detailsDiv.appendChild(
         createTextBlock("div", "details-title", normalizeString(resource.Organization) || "No name")
     );
@@ -481,9 +604,19 @@ function showDetails(resource) {
     appendDetailField("Cost", resource.Cost);
     appendDetailField("Last Verified", resource["Last Verified"]);
     appendDetailField("Notes", resource.Notes, { richText: true });
+
+    if (updateHistory) {
+        updateUrlState();
+    }
+    if (focusDetails) {
+        detailsDiv.focus();
+    }
 }
 
 function showError(message) {
+    currentResultSet = [];
+    globalData = [];
+    selectedResourceId = null;
     renderStatusCard(resultsDiv, message);
     renderDetailsEmptyState();
     updateResultCount(0);
@@ -525,66 +658,93 @@ function populateSubcategoryFilterForCategory(categoryValue) {
     }
 }
 
-function resetSubcategoryFilter() {
+function resetSubcategoryFilter(disabled = true) {
     subcategorySelect.value = "all";
     subcategorySelect.innerHTML = '<option value="all">All subcategories</option>';
-    subcategorySelect.disabled = true;
+    subcategorySelect.disabled = disabled;
 }
 
 function resetAll() {
     searchInput.value = "";
     categorySelect.value = "all";
-    resetSubcategoryFilter();
-    applyFilters();
+    resetSubcategoryFilter(true);
+    activeFilters = {
+        search: "",
+        category: "all",
+        subcategory: "all"
+    };
+    selectedResourceId = null;
+    void applyFilters();
 }
 
 // ------------------------------------
 // MAIN FILTERING FUNCTION
 // ------------------------------------
-function applyFilters() {
-    const searchTerm = normalizeString(searchInput.value).toLowerCase();
-    const categoryFilter = categorySelect.value;
-    const subcategoryFilter = subcategorySelect.value;
+function filterResourcesForSearch(resources, searchTerm) {
+    const normalizedSearch = normalizeString(searchTerm).toLowerCase();
+    if (!normalizedSearch) {
+        return resources.slice();
+    }
 
-    const filteredData = globalData.filter(resource => {
+    return resources.filter(resource => {
         const categories = normalizeStringArray(resource.Categories);
         const subcategories = normalizeStringArray(resource.Subcategories);
+        const phones = getResourcePhoneNumbers(resource);
+        const websites = getResourceWebsites(resource);
+        const searchFields = [
+            normalizeString(resource.Organization),
+            getPlainText(resource.Description),
+            categories.join(" "),
+            subcategories.join(" "),
+            normalizeString(resource.Keywords),
+            phones.map(getPhoneDisplayText).join(" "),
+            websites.map(item => getWebsiteDisplayText(item)).join(" "),
+            normalizeString(resource.Address),
+            normalizeString(resource.City),
+            normalizeString(resource.Zip)
+        ].join(" ").toLowerCase();
 
-        if (searchTerm) {
-            const phones = getResourcePhoneNumbers(resource);
-            const websites = getResourceWebsites(resource);
-            const searchFields = [
-                normalizeString(resource.Organization),
-                getPlainText(resource.Description),
-                categories.join(" "),
-                subcategories.join(" "),
-                normalizeString(resource.Keywords),
-                phones.map(getPhoneDisplayText).join(" "),
-                websites.map(item => getWebsiteDisplayText(item)).join(" ")
-            ].join(" ").toLowerCase();
-
-            if (!searchFields.includes(searchTerm)) {
-                return false;
-            }
-        }
-
-        if (categoryFilter !== "all") {
-            if (!categories.some(category => category.toLowerCase() === categoryFilter)) {
-                return false;
-            }
-        }
-
-        if (subcategoryFilter !== "all") {
-            if (!subcategories.some(subcategory => subcategory.toLowerCase() === subcategoryFilter)) {
-                return false;
-            }
-        }
-
-        return true;
+        return searchFields.includes(normalizedSearch);
     });
+}
 
+async function applyFilters(options = {}) {
+    const { forceReload = false } = options;
+    const nextSearch = normalizeString(searchInput.value);
+    const nextCategory = normalizeFilterValue(categorySelect.value);
+    const nextSubcategory = nextCategory === "all"
+        ? "all"
+        : normalizeFilterValue(subcategorySelect.value);
+
+    activeFilters = {
+        search: nextSearch,
+        category: nextCategory,
+        subcategory: nextSubcategory
+    };
+
+    const requestId = ++latestLoadRequestId;
+    renderStatusCard(resultsDiv, "Loading...");
+    updateResultCount(0);
+
+    const cacheKey = buildResourceQueryCacheKey(nextCategory, nextSubcategory);
+    let resources = !forceReload ? resourceQueryCache.get(cacheKey) : null;
+    if (!resources) {
+        resources = await loadDataForFilters({
+            category: nextCategory,
+            subcategory: nextSubcategory
+        });
+        resourceQueryCache.set(cacheKey, resources);
+    }
+
+    if (requestId !== latestLoadRequestId) {
+        return;
+    }
+
+    globalData = Array.isArray(resources) ? resources.filter(isResourcePublished) : [];
+    const filteredData = filterResourcesForSearch(globalData, nextSearch);
     sortByOrganizationInPlace(filteredData);
     renderResults(filteredData);
+    updateUrlState();
 }
 
 // -----------------------------
@@ -595,8 +755,8 @@ async function init() {
     renderDetailsEmptyState();
     updateResultCount(0);
 
-    const [data, rawCats] = await Promise.all([loadData(), loadCategories()]);
-    globalData = Array.isArray(data) ? data.filter(isResourcePublished) : [];
+    const rawCats = await loadCategories();
+    const initialState = getUrlState();
 
     const categoryLabels = rawCats ? Object.keys(rawCats) : [];
     categoryOptions = [];
@@ -609,7 +769,8 @@ async function init() {
 
         categoryOptions.push({
             label: labelTrimmed,
-            value: valueLower
+            value: valueLower,
+            raw: labelTrimmed
         });
 
         const subs = Array.isArray(rawCats[catLabel]) ? rawCats[catLabel] : [];
@@ -617,41 +778,78 @@ async function init() {
             const raw = normalizeString(subLabel);
             return {
                 value: raw.toLowerCase(),
-                label: formatSubcategoryLabel(raw)
+                label: formatSubcategoryLabel(raw),
+                raw
             };
         });
     });
 
     populateCategoryFilter();
-    resetSubcategoryFilter();
-    applyFilters();
+    categorySelect.value = initialState.category;
+    populateSubcategoryFilterForCategory(initialState.category);
+    subcategorySelect.value = initialState.category === "all" ? "all" : initialState.subcategory;
+    searchInput.value = initialState.search;
+    selectedResourceId = initialState.selectedId;
+    activeFilters = {
+        search: initialState.search,
+        category: initialState.category,
+        subcategory: initialState.category === "all" ? "all" : initialState.subcategory
+    };
+
+    await applyFilters();
 }
 
 // -----------------------------
 // EVENT LISTENERS
 // -----------------------------
-searchInput.addEventListener("input", applyFilters);
+let searchDebounceHandle = null;
+searchInput.addEventListener("input", () => {
+    window.clearTimeout(searchDebounceHandle);
+    searchDebounceHandle = window.setTimeout(() => {
+        void applyFilters();
+    }, 150);
+});
 
 categorySelect.addEventListener("change", () => {
     populateSubcategoryFilterForCategory(categorySelect.value);
-    applyFilters();
+    if (categorySelect.value === "all") {
+        resetSubcategoryFilter(true);
+    }
+    selectedResourceId = null;
+    void applyFilters({ forceReload: true });
 });
 
-subcategorySelect.addEventListener("change", applyFilters);
+subcategorySelect.addEventListener("change", () => {
+    selectedResourceId = null;
+    void applyFilters({ forceReload: true });
+});
 
 resetButton.addEventListener("click", resetAll);
 
-function handleHomeClick() {
+function handleHomeClick(event) {
+    event?.preventDefault?.();
     resetAll();
     window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-if (brandHomeEl) {
-    brandHomeEl.addEventListener("click", handleHomeClick);
+if (brandHomeLink) {
+    brandHomeLink.addEventListener("click", handleHomeClick);
 }
-if (titleEl) {
-    titleEl.addEventListener("click", handleHomeClick);
-}
+
+window.addEventListener("popstate", () => {
+    const nextState = getUrlState();
+    searchInput.value = nextState.search;
+    categorySelect.value = nextState.category;
+    populateSubcategoryFilterForCategory(nextState.category);
+    subcategorySelect.value = nextState.category === "all" ? "all" : nextState.subcategory;
+    selectedResourceId = nextState.selectedId;
+    activeFilters = {
+        search: nextState.search,
+        category: nextState.category,
+        subcategory: nextState.category === "all" ? "all" : nextState.subcategory
+    };
+    void applyFilters();
+});
 
 // -----------------------------
 // Start app

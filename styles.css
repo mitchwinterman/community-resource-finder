@@ -156,8 +156,26 @@ h1 {
     align-items: stretch;
 }
 
+.search-control {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
 .search-box {
     flex: 1;
+}
+
+.search-control label,
+.search-control-label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #334155;
+}
+
+.search-control-action {
+    justify-content: flex-end;
 }
 
 input[type="text"] {
@@ -201,6 +219,14 @@ select:focus {
     margin-bottom: 8px;
 }
 
+.panel-heading {
+    font-family: "Poppins", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: #102a43;
+    margin-bottom: 8px;
+}
+
 /* MASTER-DETAIL SPLIT */
 .content-split {
     display: flex;
@@ -234,6 +260,9 @@ select:focus {
 
 /* Results cards */
 .result-card {
+    display: block;
+    width: 100%;
+    text-align: left;
     padding: 14px 16px;
     border-radius: 12px;
     margin-bottom: 10px;
@@ -241,11 +270,30 @@ select:focus {
     cursor: pointer;
     transition: 0.18s ease;
     border: 1px solid transparent;
+    appearance: none;
+    color: inherit;
 }
 
 .result-card:hover {
     background: #eef3ff;
     border-color: #d0defd;
+}
+
+.result-card:focus-visible,
+.reset-btn:focus-visible,
+.header-action-btn:focus-visible,
+.header-action-link:focus-visible,
+.footer-right a:focus-visible,
+.brand-home-link:focus-visible,
+.wcls-link:focus-visible,
+select:focus-visible,
+input[type="text"]:focus-visible {
+    outline: 3px solid #1d4ed8;
+    outline-offset: 2px;
+}
+
+.result-status-card {
+    cursor: default;
 }
 
 .card-title {

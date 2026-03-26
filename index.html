@@ -64,8 +64,9 @@
             </div>
         </header>
 
-        <div class="search-row">
-            <div class="search-box">
+        <div class="search-row" aria-label="Search and filter resources">
+            <div class="search-control search-box">
+                <label for="searchBox">Search</label>
                 <input
                     type="text"
                     id="searchBox"
@@ -73,35 +74,40 @@
                 />
             </div>
 
-            <div>
+            <div class="search-control">
+                <label for="categorySelect">Category</label>
                 <select id="categorySelect">
                     <option value="all">All categories</option>
                 </select>
             </div>
 
-            <div>
+            <div class="search-control">
+                <label for="subcategorySelect">Subcategory</label>
                 <select id="subcategorySelect" disabled>
                     <option value="all">All subcategories</option>
                 </select>
             </div>
 
-            <div>
+            <div class="search-control search-control-action">
+                <span class="search-control-label">Actions</span>
                 <button id="resetButton" class="reset-btn">Reset</button>
             </div>
         </div>
 
         <div class="content-split">
-            <div class="results-panel">
-                <div id="resultCount" class="result-count"></div>
-                <div id="results">Loading...</div>
-            </div>
+            <section class="results-panel" aria-labelledby="results-heading">
+                <h2 id="results-heading" class="panel-heading">Results</h2>
+                <div id="resultCount" class="result-count" aria-live="polite"></div>
+                <div id="results" aria-labelledby="results-heading">Loading...</div>
+            </section>
 
-            <div id="details" class="details-panel">
+            <section id="details" class="details-panel" aria-labelledby="details-heading" tabindex="-1">
+                <h2 id="details-heading" class="panel-heading">Resource Details</h2>
                 <div class="details-empty">
                     Select a resource<br />
-                    <small>Use the search bar or filters above to find a resource, then click to view full details.</small>
+                    <small>Use the search bar or filters above to find a resource, then select it to view full details.</small>
                 </div>
-            </div>
+            </section>
         </div>
 
         <footer class="app-footer">
