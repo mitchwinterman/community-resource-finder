@@ -2,7 +2,7 @@
 
 Community Resource Finder is a Firebase-backed directory for browsing community services, filtering them by category and subcategory, and maintaining the directory through a browser-based admin panel.
 
-This repository currently contains the public site, the admin interface, the Firebase client configuration, shared normalization rules for taxonomy and contact fields, Firestore security rules, a one-time admin-claim setup script, and legacy JSON source files from the original Firestore seed process.
+This repository currently contains the public site, the admin interface, the Firebase client configuration, shared normalization rules for taxonomy and contact fields, Firestore security rules, a one-time admin-claim setup script, a local Outlook mail worker, and legacy JSON source files from the original Firestore seed process.
 
 ## What This Project Does
 
@@ -43,8 +43,6 @@ Top-level files:
 - `auth-routing.js`: shared role detection and redirect logic for admin and org portals
 - `org.html`: organization login and submission portal
 - `org.js`: organization-side request submission logic
-- `ownership-backfill.html`: one-time Phase 2A ownership/status backfill page
-- `ownership-backfill.js`: one-time Phase 2A resource ownership backfill logic
 - `taxonomy-rules.js`: shared taxonomy normalization rules used by the admin category editor
 - `contact-fields.js`: shared website and phone normalization helpers used by the app and admin
 - `firestore.rules`: Cloud Firestore security rules for public reads and admin-only writes
@@ -585,7 +583,6 @@ After starting a local server, these pages should be available:
 - `/login.html`
 - `/admin.html`
 - `/org.html`
-- `/ownership-backfill.html`
 
 ## Public Site Behavior
 
@@ -758,26 +755,6 @@ The Categories panel allows staff to:
 - add or remove subcategories
 - save changes
 - delete categories
-
-### Ownership Backfill
-
-Use `ownership-backfill.html` after creating organization records in `admin.html`.
-
-The tool:
-
-- can bootstrap organization owner records directly from unique existing resource names
-- loads resources missing `organizationId`, `status`, or `submissionState`
-- suggests an owner when the resource name exactly matches an organization record
-- lets a library admin assign ownership manually when there is no safe exact match
-- backfills default publication metadata onto older resource docs
-
-Recommended order:
-
-1. publish the updated `firestore.rules`
-2. either create organization records in `admin.html` or use `Bootstrap Organizations` in `ownership-backfill.html`
-3. run the backfill preview in `ownership-backfill.html`
-4. run the backfill
-5. spot-check resources in `admin.html`
 
 ### Request Review
 
