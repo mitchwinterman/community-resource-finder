@@ -18,14 +18,12 @@ import {
 async function loadDataForFilters(filters = {}) {
     const category = normalizeString(filters.category).toLowerCase();
     const subcategory = normalizeString(filters.subcategory).toLowerCase();
-    const categoryQueryValue = getStoredCategoryValue(category);
     const subcategoryQueryValue = getStoredSubcategoryValue(category, subcategory);
+    const categoryMatcher = createCategoryResourceMatcher(category);
 
     const constraints = [where("status", "==", "published")];
     if (subcategoryQueryValue) {
         constraints.push(where("Subcategories", "array-contains", subcategoryQueryValue));
-    } else if (categoryQueryValue) {
-        constraints.push(where("Categories", "array-contains", categoryQueryValue));
     }
 
     try {
@@ -38,7 +36,7 @@ async function loadDataForFilters(filters = {}) {
             });
         });
 
-        if (!list.length && (subcategoryQueryValue || categoryQueryValue)) {
+        if (!subcategoryQueryValue && category !== "all") {
             const fallbackSnap = await getDocs(query(
                 collection(db, "resources"),
                 where("status", "==", "published")
@@ -49,15 +47,29 @@ async function loadDataForFilters(filters = {}) {
                     id: docSnap.id,
                     ...docSnap.data()
                 };
-                const categories = normalizeStringArray(data.Categories).map(normalizeTaxonomyMatchValue);
+                if (categoryMatcher(data)) {
+                    fallbackList.push(data);
+                }
+            });
+            return fallbackList;
+        }
+
+        if (!list.length && subcategoryQueryValue) {
+            const fallbackSnap = await getDocs(query(
+                collection(db, "resources"),
+                where("status", "==", "published")
+            ));
+            const fallbackList = [];
+            fallbackSnap.forEach(docSnap => {
+                const data = {
+                    id: docSnap.id,
+                    ...docSnap.data()
+                };
                 const subcategories = normalizeStringArray(data.Subcategories).map(normalizeTaxonomyMatchValue);
-                const normalizedCategory = normalizeTaxonomyMatchValue(category);
                 const normalizedSubcategory = normalizeTaxonomyMatchValue(subcategory);
 
                 if (subcategory !== "all") {
                     if (!subcategories.includes(normalizedSubcategory)) return;
-                } else if (category !== "all") {
-                    if (!categories.includes(normalizedCategory)) return;
                 }
 
                 fallbackList.push(data);
@@ -204,6 +216,29 @@ function buildResourceQueryCacheKey(categoryFilter, subcategoryFilter) {
     const category = normalizeFilterValue(categoryFilter);
     const subcategory = normalizeFilterValue(subcategoryFilter);
     return `category:${category}|subcategory:${subcategory}`;
+}
+
+function createCategoryResourceMatcher(categoryValue) {
+    const normalizedCategory = normalizeFilterValue(categoryValue);
+    const categorySubcategoryValues = new Set(
+        (subcategoryOptions[normalizedCategory] || [])
+            .map(option => normalizeTaxonomyMatchValue(option.raw || option.value))
+            .filter(Boolean)
+    );
+
+    return (resource) => {
+        const categories = normalizeStringArray(resource?.Categories).map(normalizeTaxonomyMatchValue);
+        if (categories.includes(normalizeTaxonomyMatchValue(normalizedCategory))) {
+            return true;
+        }
+
+        if (!categorySubcategoryValues.size) {
+            return false;
+        }
+
+        const subcategories = normalizeStringArray(resource?.Subcategories).map(normalizeTaxonomyMatchValue);
+        return subcategories.some(item => categorySubcategoryValues.has(item));
+    };
 }
 
 function getStoredCategoryValue(categoryValue) {

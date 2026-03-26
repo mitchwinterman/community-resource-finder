@@ -170,6 +170,8 @@ Each document in `resources` is expected to look roughly like this:
   "lastApprovedAt": "<timestamp>",
   "lastApprovedBy": "<uid>",
   "Last Verified": "2026-03-01",
+  "Latitude": 39.5296,
+  "Longitude": -119.8138,
   "Keywords": "housing, shelter, pantry",
   "UpdatedBy": "Staff Name",
   "Languages": "English, Spanish",
@@ -185,6 +187,7 @@ Notes:
 - `Categories` and `Subcategories` are stored as arrays of strings.
 - `Websites` is stored as an array of strings.
 - `PhoneNumbers` is stored as an array of objects with `number` and optional `label`.
+- `Latitude` and `Longitude` can be stored as numeric coordinates for future map support.
 - `Website` and `Phone` are legacy fields and should remain blank after migration.
 - `Last Verified` is stored as a string in `YYYY-MM-DD` format when entered through the admin UI.
 - `organizationId` links a resource to its owning document in `organizations`.
@@ -696,6 +699,8 @@ The current resource editor includes:
 - `Address`
 - `City`
 - `Zip`
+- `Latitude`
+- `Longitude`
 - `Hours`
 - `Eligibility`
 - `Cost`
@@ -722,6 +727,8 @@ Selected categories and subcategories are saved back to Firestore as arrays.
 When saving categories, known deprecated subcategory labels are automatically normalized to the current canonical labels.
 
 When saving resources, websites are saved in `Websites`, and phone entries are saved in `PhoneNumbers` with optional labels such as `Main`, `Office`, or `Cell`. The legacy `Website` and `Phone` fields are cleared.
+
+The admin resource editor and request-review editor now include a `Geocode Address` helper that looks up `Latitude` and `Longitude` from the current address fields.
 
 ### Organization Management
 

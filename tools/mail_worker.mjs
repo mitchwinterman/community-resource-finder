@@ -54,6 +54,8 @@ const reviewRequestEditableFields = [
   "Address",
   "City",
   "Zip",
+  "Latitude",
+  "Longitude",
   "Hours",
   "Eligibility",
   "Cost",
@@ -85,6 +87,14 @@ function normalizeStringArray(value) {
   return value.map(item => normalizeString(item)).filter(Boolean);
 }
 
+function normalizeCoordinateValue(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return "";
+
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : normalized;
+}
+
 function cloneStructuredValue(value) {
   if (value == null) return null;
   return JSON.parse(JSON.stringify(value));
@@ -104,6 +114,11 @@ function sanitizeRequestSnapshot(resource) {
 
     if (field === "Categories" || field === "Subcategories") {
       payload[field] = normalizeStringArray(rawValue);
+      return;
+    }
+
+    if (field === "Latitude" || field === "Longitude") {
+      payload[field] = normalizeCoordinateValue(rawValue);
       return;
     }
 

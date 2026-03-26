@@ -71,6 +71,8 @@ const orgEditableResourceFields = [
   "Address",
   "City",
   "Zip",
+  "Latitude",
+  "Longitude",
   "Hours",
   "Eligibility",
   "Cost",
@@ -100,6 +102,14 @@ function normalizeString(value) {
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
   return value.map(item => normalizeString(item)).filter(Boolean);
+}
+
+function normalizeCoordinateValue(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return "";
+
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : normalized;
 }
 
 function normalizeRequestStatus(value) {
@@ -229,6 +239,11 @@ function sanitizeRequestedResourceData(value) {
 
     if (field === "Categories" || field === "Subcategories") {
       payload[field] = normalizeStringArray(rawValue);
+      return;
+    }
+
+    if (field === "Latitude" || field === "Longitude") {
+      payload[field] = normalizeCoordinateValue(rawValue);
       return;
     }
 
@@ -711,6 +726,8 @@ function buildResourceForm(resource) {
   resourceForm.appendChild(buildFieldText("Address", "Address", resource.Address || "", false));
   resourceForm.appendChild(buildFieldText("City", "City", resource.City || "", false));
   resourceForm.appendChild(buildFieldText("Zip", "Zip", resource.Zip || "", false));
+  resourceForm.appendChild(buildFieldText("Latitude", "Latitude", resource.Latitude ?? "", false));
+  resourceForm.appendChild(buildFieldText("Longitude", "Longitude", resource.Longitude ?? "", false));
   resourceForm.appendChild(buildFieldText("Hours", "Hours", resource.Hours || "", false));
   resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", resource.Eligibility || "", false));
   resourceForm.appendChild(buildFieldText("Cost", "Cost", resource.Cost || "", false));

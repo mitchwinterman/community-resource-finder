@@ -262,6 +262,8 @@ const orgEditableResourceFields = [
   "Address",
   "City",
   "Zip",
+  "Latitude",
+  "Longitude",
   "Hours",
   "Eligibility",
   "Cost",
@@ -282,6 +284,8 @@ const requestReviewFieldConfig = [
   { field: "Address", label: "Address" },
   { field: "City", label: "City" },
   { field: "Zip", label: "Zip" },
+  { field: "Latitude", label: "Latitude" },
+  { field: "Longitude", label: "Longitude" },
   { field: "Hours", label: "Hours" },
   { field: "Eligibility", label: "Eligibility" },
   { field: "Cost", label: "Cost" },
@@ -313,6 +317,14 @@ function normalizeString(v) {
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
   return value.map(item => normalizeString(item)).filter(Boolean);
+}
+
+function normalizeCoordinateValue(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return "";
+
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : normalized;
 }
 
 function normalizeBaseUrl(value) {
@@ -982,6 +994,11 @@ function sanitizeRequestedResourceData(value) {
       return;
     }
 
+    if (field === "Latitude" || field === "Longitude") {
+      payload[field] = normalizeCoordinateValue(rawValue);
+      return;
+    }
+
     if (field === "Websites") {
       payload[field] = normalizeWebsiteList(rawValue);
       return;
@@ -1291,6 +1308,9 @@ function buildRequestEditFieldset(data) {
   requestEditForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
   requestEditForm.appendChild(buildFieldText("City", "City", data.City || "", false));
   requestEditForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
+  requestEditForm.appendChild(buildFieldText("Latitude", "Latitude", data.Latitude ?? "", false));
+  requestEditForm.appendChild(buildFieldText("Longitude", "Longitude", data.Longitude ?? "", false));
+  requestEditForm.appendChild(buildGeocodeHelper(requestEditForm));
   requestEditForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
   requestEditForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
   requestEditForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
@@ -1725,6 +1745,129 @@ function buildFieldText(fieldKey, label, value = "", required = false) {
   return wrap;
 }
 
+function getFormFieldInput(formEl, fieldName) {
+  return formEl?.querySelector(`.field-group[data-field="${fieldName}"] input`) || null;
+}
+
+function getFormFieldValue(formEl, fieldName) {
+  return normalizeString(getFormFieldInput(formEl, fieldName)?.value);
+}
+
+function setFormFieldValue(formEl, fieldName, value) {
+  const input = getFormFieldInput(formEl, fieldName);
+  if (input) {
+    input.value = normalizeString(value);
+  }
+}
+
+function stripAddressUnitDetails(address) {
+  return normalizeString(address)
+    .replace(/\b(?:suite|ste|unit|apt|apartment|bldg|building|floor|fl|room|rm)\b[\s.#-]*[a-z0-9-]+/gi, "")
+    .replace(/\s+#\s*[a-z0-9-]+\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+,/g, ",")
+    .replace(/,+$/g, "")
+    .trim();
+}
+
+function buildGeocodeQueries(formEl) {
+  const address = getFormFieldValue(formEl, "Address");
+  const city = getFormFieldValue(formEl, "City");
+  const zip = getFormFieldValue(formEl, "Zip");
+  const simplifiedAddress = stripAddressUnitDetails(address);
+
+  const variants = [
+    [address, city, zip, "Nevada", "USA"],
+    [simplifiedAddress, city, zip, "Nevada", "USA"],
+    [address, city, "Nevada", "USA"],
+    [simplifiedAddress, city, "Nevada", "USA"],
+    [address, zip, "Nevada", "USA"],
+    [simplifiedAddress, zip, "Nevada", "USA"]
+  ];
+
+  return Array.from(new Set(
+    variants
+      .map(parts => parts.filter(Boolean).join(", "))
+      .map(query => normalizeString(query))
+      .filter(Boolean)
+  ));
+}
+
+function buildGeocodeHelper(formEl) {
+  const wrap = createEl("div", { className: "field-group field-meta-group geocode-helper-group" });
+  const label = createEl("label", { className: "field-label", text: "Map Coordinates" });
+  const actions = createEl("div", { className: "geocode-helper-actions" });
+  const button = createEl("button", {
+    className: "field-list-add-btn",
+    text: "Geocode Address",
+    attrs: { type: "button" }
+  });
+  const status = createEl("div", {
+    className: "field-meta-value geocode-helper-status",
+    text: "Look up coordinates from the current address, city, and zip."
+  });
+
+  button.addEventListener("click", async () => {
+    const queries = buildGeocodeQueries(formEl);
+    if (!queries.length) {
+      status.textContent = "Enter at least an address, city, or zip before geocoding.";
+      return;
+    }
+
+    button.disabled = true;
+    status.textContent = "Looking up coordinates...";
+
+    try {
+      let best = null;
+      let matchedQuery = "";
+
+      for (const queryText of queries) {
+        const url = new URL("https://nominatim.openstreetmap.org/search");
+        url.searchParams.set("format", "jsonv2");
+        url.searchParams.set("limit", "1");
+        url.searchParams.set("countrycodes", "us");
+        url.searchParams.set("q", queryText);
+
+        const response = await fetch(url.toString(), {
+          headers: { Accept: "application/json" }
+        });
+        if (!response.ok) {
+          throw new Error(`Geocoder returned ${response.status}.`);
+        }
+
+        const results = await response.json();
+        best = Array.isArray(results) ? results[0] : null;
+        if (best?.lat && best?.lon) {
+          matchedQuery = queryText;
+          break;
+        }
+      }
+
+      if (!best?.lat || !best?.lon) {
+        status.textContent = "No coordinates found for that address. Adjust the address and try again.";
+        return;
+      }
+
+      const latitude = Number.parseFloat(best.lat);
+      const longitude = Number.parseFloat(best.lon);
+      setFormFieldValue(formEl, "Latitude", Number.isFinite(latitude) ? latitude.toFixed(6) : best.lat);
+      setFormFieldValue(formEl, "Longitude", Number.isFinite(longitude) ? longitude.toFixed(6) : best.lon);
+      status.textContent = `Coordinates found using "${matchedQuery}": ${best.display_name || `${best.lat}, ${best.lon}`}`;
+    } catch (error) {
+      console.error("Geocode lookup failed:", error);
+      status.textContent = `Geocode lookup failed: ${normalizeString(error?.message || String(error))}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  actions.appendChild(button);
+  wrap.appendChild(label);
+  wrap.appendChild(actions);
+  wrap.appendChild(status);
+  return wrap;
+}
+
 function buildFieldDate(fieldKey, label, value = "") {
   const wrap = createEl("div", {
     className: "field-group",
@@ -2052,6 +2195,9 @@ function buildResourceForm(data) {
   resourceForm.appendChild(buildFieldText("Address", "Address", data.Address || "", false));
   resourceForm.appendChild(buildFieldText("City", "City", data.City || "", false));
   resourceForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
+  resourceForm.appendChild(buildFieldText("Latitude", "Latitude", data.Latitude ?? "", false));
+  resourceForm.appendChild(buildFieldText("Longitude", "Longitude", data.Longitude ?? "", false));
+  resourceForm.appendChild(buildGeocodeHelper(resourceForm));
   resourceForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
   resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
   resourceForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
