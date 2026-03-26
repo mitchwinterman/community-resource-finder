@@ -3041,8 +3041,22 @@ deleteMembershipUserBtn?.addEventListener("click", async () => {
   if (!confirm(`Delete this organization access record and permanently delete the Firebase user for ${targetLabel}?`)) return;
 
   try {
-    await queueAuthUserDeletion(previousMembership);
-    await deleteDoc(doc(db, "organization_members", editingMembershipId));
+    try {
+      await queueAuthUserDeletion(previousMembership);
+    } catch (err) {
+      console.error("Failed to queue Firebase Auth deletion action:", err);
+      alert("Could not queue the Firebase user deletion action. This usually means the live Firestore rules do not yet allow admin access to auth_user_actions.");
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, "organization_members", editingMembershipId));
+    } catch (err) {
+      console.error("Failed to delete organization membership record:", err);
+      alert("The Firebase user deletion was queued, but deleting the organization membership record failed. See console for details.");
+      return;
+    }
+
     await logAuditEvent({
       area: "access",
       action: "membership.deleted",
