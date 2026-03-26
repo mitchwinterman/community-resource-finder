@@ -250,13 +250,6 @@ function createCategoryResourceMatcher(categoryValue) {
     };
 }
 
-function getStoredCategoryValue(categoryValue) {
-    const normalized = normalizeFilterValue(categoryValue);
-    if (normalized === "all") return "";
-    const match = categoryOptions.find(option => option.value === normalized);
-    return normalizeString(match?.raw || "");
-}
-
 function getStoredSubcategoryValue(categoryValue, subcategoryValue) {
     const normalizedCategory = normalizeFilterValue(categoryValue);
     const normalizedSubcategory = normalizeFilterValue(subcategoryValue);

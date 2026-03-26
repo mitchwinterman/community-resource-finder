@@ -28,45 +28,45 @@ The project is implemented as a small static frontend application. There is no b
 Top-level files:
 
 - `index.html`: public search and browse UI
-- `app.js`: public application logic, Firestore reads, filtering, and details rendering
-- `styles.css`: shared public-facing styling
 - `about.html`: about page
 - `help.html`: help page
 - `contact.html`: contact and resource suggestion form
 - `login.html`: unified login entry point that routes by role
-- `login.js`: role-aware login and portal routing logic
 - `review.html`: public quarterly-review confirmation page for secure email links
-- `review.js`: quarterly-review token handling and confirmation logic
 - `admin.html`: admin login and editing interface
-- `admin.js`: admin authentication and CRUD operations for resources, categories, organizations, review status, mail, audit logs, and request review
-- `admin.css`: admin styling
-- `auth-routing.js`: shared role detection and redirect logic for admin and org portals
 - `org.html`: organization login and submission portal
-- `org.js`: organization-side request submission logic
-- `taxonomy-rules.js`: shared taxonomy normalization rules used by the admin category editor
-- `contact-fields.js`: shared website and phone normalization helpers used by the app and admin
 - `firestore.rules`: Cloud Firestore security rules for public reads and admin-only writes
 - `package.json`: Node tooling for one-time Firebase Admin scripts
+- `assets/css/styles.css`: shared public-facing styling
+- `assets/css/admin.css`: admin and portal styling
+- `assets/js/app.js`: public application logic, Firestore reads, filtering, and details rendering
+- `assets/js/login.js`: role-aware login and portal routing logic
+- `assets/js/review.js`: quarterly-review token handling and confirmation logic
+- `assets/js/admin.js`: admin authentication and CRUD operations for resources, categories, organizations, review status, mail, audit logs, and request review
+- `assets/js/auth-routing.js`: shared role detection and redirect logic for admin and org portals
+- `assets/js/org.js`: organization-side request submission logic
+- `assets/js/taxonomy-rules.js`: shared taxonomy normalization rules used by the admin category editor
+- `assets/js/contact-fields.js`: shared website and phone normalization helpers used by the app and admin
+- `assets/js/firebase.js`: Firebase app, Firestore, and Auth initialization
+- `assets/data/data.json`: legacy resource data snapshot retained for reference
+- `assets/data/categories.json`: canonical category/subcategory snapshot retained for reference
+- `assets/img/crf-logo.png`: Community Resource Finder logo
+- `assets/img/wcls-logo.png`: Washoe County Library System logo
 - `tools/set_admin_claim.mjs`: one-time script to grant or remove the Firebase `admin` custom claim
 - `tools/mail_worker.mjs`: recurring outbound mail worker that drains `mail_queue` through Outlook Desktop
 - `tools/send_outlook_mail.ps1`: Outlook COM bridge used by the mail worker on Windows
 - `tools/run_mail_worker.ps1`: scheduler-friendly wrapper that sets env vars and launches the Outlook mail worker
 - `tools/coordinate_backfill.mjs`: one-time coordinate backfill script for previewing and writing `Latitude` / `Longitude` on existing resources
-- `firebase.js`: Firebase app, Firestore, and Auth initialization
-- `data.json`: legacy resource data snapshot retained for reference
-- `categories.json`: canonical category/subcategory snapshot retained for reference
-- `crf-logo.png`: Community Resource Finder logo
-- `wcls-logo.png`: Washoe County Library System logo
 
 ## High-Level Architecture
 
 ### Public App
 
-The public app lives in `index.html` + `app.js`.
+The public app lives in `index.html` + `assets/js/app.js`.
 
 At startup it:
 
-1. Connects to Firebase using the config in `firebase.js`.
+1. Connects to Firebase using the config in `assets/js/firebase.js`.
 2. Reads the `resources` collection from Firestore.
 3. Reads the `categories` collection from Firestore.
 4. Filters the loaded resources so only `published` records are treated as live.
@@ -76,7 +76,7 @@ At startup it:
 
 ### Admin App
 
-The admin app lives in `admin.html` + `admin.js`.
+The admin app lives in `admin.html` + `assets/js/admin.js`.
 
 It:
 
@@ -93,7 +93,7 @@ It:
 
 ### Organization Portal
 
-The organization portal lives in `org.html` + `org.js`.
+The organization portal lives in `org.html` + `assets/js/org.js`.
 
 It:
 
@@ -106,7 +106,7 @@ It:
 
 ## Firebase Configuration
 
-The app is currently configured for this Firebase project in `firebase.js`:
+The app is currently configured for this Firebase project in `assets/js/firebase.js`:
 
 - `projectId`: `washoe-community-resources`
 - `authDomain`: `washoe-community-resources.firebaseapp.com`
@@ -983,8 +983,8 @@ If recreating the project from scratch:
 The current dataset appears to contain some inconsistent values, placeholder blanks, and formatting issues. Examples include:
 
 - blank fields represented as `" "` instead of empty strings
-- the legacy `data.json` snapshot still contains old single-string website and phone formats
-- the legacy `data.json` snapshot may not match the cleaned live taxonomy exactly
+- the legacy `assets/data/data.json` snapshot still contains old single-string website and phone formats
+- the legacy `assets/data/data.json` snapshot may not match the cleaned live taxonomy exactly
 
 Treat the data model as operationally useful but not yet normalized.
 
