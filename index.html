@@ -94,6 +94,17 @@
             </div>
         </div>
 
+        <div class="view-scope-bar" aria-label="Directory view scope">
+            <div class="view-scope-toggle" role="tablist" aria-label="Map scope">
+                <button id="selectedScopeToggle" class="view-scope-toggle-btn active" type="button" role="tab" aria-selected="true">
+                    Selected Resource
+                </button>
+                <button id="resultsScopeToggle" class="view-scope-toggle-btn" type="button" role="tab" aria-selected="false">
+                    All Results Map
+                </button>
+            </div>
+        </div>
+
         <div class="content-split">
             <section class="results-panel" aria-labelledby="results-heading">
                 <h2 id="results-heading" class="panel-heading">Results</h2>
@@ -102,10 +113,18 @@
             </section>
 
             <section id="details" class="details-panel" aria-labelledby="details-heading" tabindex="-1">
-                <h2 id="details-heading" class="panel-heading">Resource Details</h2>
-                <div class="details-empty">
-                    Select a resource<br />
-                    <small>Use the search bar or filters above to find a resource, then select it to view full details.</small>
+                <div class="right-panel-header">
+                    <h2 id="details-heading" class="panel-heading">Resource Details</h2>
+                    <div class="right-panel-toggle" role="tablist" aria-label="Right panel view">
+                        <button id="detailsViewToggle" class="right-panel-toggle-btn active" type="button" role="tab" aria-selected="true">Details</button>
+                        <button id="mapViewToggle" class="right-panel-toggle-btn" type="button" role="tab" aria-selected="false">Map</button>
+                    </div>
+                </div>
+                <div id="rightPanelContent">
+                    <div class="details-empty">
+                        Select a resource<br />
+                        <small>Use the search bar or filters above to find a resource, then select it to view full details.</small>
+                    </div>
                 </div>
             </section>
         </div>

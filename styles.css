@@ -156,6 +156,44 @@ h1 {
     align-items: stretch;
 }
 
+.view-scope-bar {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: -6px;
+}
+
+.view-scope-toggle {
+    display: inline-flex;
+    gap: 6px;
+    padding: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.88);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.2);
+}
+
+.view-scope-toggle-btn {
+    border: none;
+    background: transparent;
+    color: #475569;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 9px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: 0.15s ease;
+}
+
+.view-scope-toggle-btn:hover {
+    color: #0f172a;
+    background: rgba(37, 99, 235, 0.08);
+}
+
+.view-scope-toggle-btn.active {
+    background: linear-gradient(135deg, #2563eb, #0ea5e9);
+    color: #ffffff;
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
+}
+
 .search-control {
     display: flex;
     flex-direction: column;
@@ -252,10 +290,102 @@ select:focus {
     box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.15);
 }
 
+.right-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.right-panel-toggle {
+    display: inline-flex;
+    gap: 6px;
+    padding: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.84);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.2);
+}
+
+.right-panel-toggle-btn {
+    border: none;
+    background: transparent;
+    color: #475569;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 9px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: 0.15s ease;
+}
+
+.right-panel-toggle-btn:hover {
+    color: #0f172a;
+    background: rgba(37, 99, 235, 0.08);
+}
+
+.right-panel-toggle-btn.active {
+    background: linear-gradient(135deg, #2563eb, #0ea5e9);
+    color: #ffffff;
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
+}
+
+.right-panel-toggle-btn:disabled {
+    cursor: default;
+    opacity: 0.45;
+    background: transparent;
+    box-shadow: none;
+}
+
 .details-empty {
     text-align: center;
     color: #6b7280;
     margin-top: 40px;
+}
+
+.map-placeholder {
+    min-height: calc(70vh - 92px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 16px;
+    padding: 26px;
+    border-radius: 16px;
+    background:
+        radial-gradient(circle at top left, rgba(14, 165, 233, 0.16), transparent 36%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(226, 232, 240, 0.92));
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+}
+
+.map-placeholder-title {
+    font-family: "Poppins", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: #102a43;
+}
+
+.map-placeholder-copy,
+.map-placeholder-note {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #475569;
+    max-width: 58ch;
+}
+
+.map-placeholder-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.map-placeholder-stat {
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.88);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 700;
 }
 
 /* Results cards */
@@ -542,6 +672,21 @@ input[type="text"]:focus-visible {
         flex-direction: column;
     }
 
+    .view-scope-bar {
+        justify-content: stretch;
+        margin-top: -2px;
+    }
+
+    .view-scope-toggle {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .view-scope-toggle-btn {
+        flex: 1;
+        text-align: center;
+    }
+
     .content-split {
         flex-direction: column;
     }
@@ -550,6 +695,20 @@ input[type="text"]:focus-visible {
     .details-panel {
         width: 100%;
         max-height: none;
+    }
+
+    .right-panel-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .right-panel-toggle {
+        justify-content: space-between;
+    }
+
+    .right-panel-toggle-btn {
+        flex: 1;
+        text-align: center;
     }
 
     .app-footer {

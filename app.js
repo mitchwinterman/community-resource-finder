@@ -113,6 +113,12 @@ const brandHomeLink = document.querySelector(".brand-home-link");
 
 const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
+const rightPanelContent = document.getElementById("rightPanelContent");
+const detailsHeading = document.getElementById("details-heading");
+const detailsViewToggle = document.getElementById("detailsViewToggle");
+const mapViewToggle = document.getElementById("mapViewToggle");
+const selectedScopeToggle = document.getElementById("selectedScopeToggle");
+const resultsScopeToggle = document.getElementById("resultsScopeToggle");
 const resultCountEl = document.getElementById("resultCount");
 
 // -----------------------------
@@ -123,6 +129,8 @@ let categoryOptions = [];
 let subcategoryOptions = {};
 let selectedResourceId = null;
 let currentResultSet = [];
+let activeRightPanel = "details";
+let activeMapScope = "selected";
 let activeFilters = {
     search: "",
     category: "all",
@@ -208,8 +216,8 @@ function clearElement(el) {
 }
 
 function renderDetailsShell() {
-    clearElement(detailsDiv);
-    detailsDiv.appendChild(createTextBlock("h2", "panel-heading", "Resource Details"));
+    clearElement(rightPanelContent);
+    updateRightPanelToggleUi();
 }
 
 function buildResourceQueryCacheKey(categoryFilter, subcategoryFilter) {
@@ -263,11 +271,15 @@ function getUrlState() {
     const category = normalizeFilterValue(params.get("c"));
     const subcategory = normalizeFilterValue(params.get("s"));
     const selectedId = normalizeString(params.get("id"));
+    const view = normalizeFilterValue(params.get("view")) === "map" ? "map" : "details";
+    const scope = normalizeFilterValue(params.get("scope")) === "results" ? "results" : "selected";
     return {
         search,
         category,
         subcategory: category === "all" ? "all" : subcategory,
-        selectedId
+        selectedId,
+        view,
+        scope
     };
 }
 
@@ -279,11 +291,15 @@ function updateUrlState() {
         params.set("s", activeFilters.subcategory);
     }
     if (selectedResourceId) params.set("id", selectedResourceId);
+    if (activeRightPanel === "map") params.set("view", "map");
+    if (activeMapScope === "results") params.set("scope", "results");
 
     const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
     window.history.replaceState({
         ...activeFilters,
-        selectedId: selectedResourceId
+        selectedId: selectedResourceId,
+        view: activeRightPanel,
+        scope: activeMapScope
     }, "", nextUrl);
 }
 
@@ -410,6 +426,104 @@ function createTextBlock(tagName, className, text) {
     return el;
 }
 
+function updateRightPanelToggleUi() {
+    const selectedScope = activeMapScope === "selected";
+    const isDetails = activeRightPanel === "details";
+    detailsViewToggle?.classList.toggle("active", selectedScope && isDetails);
+    mapViewToggle?.classList.toggle("active", selectedScope && !isDetails);
+    detailsViewToggle?.setAttribute("aria-selected", selectedScope && isDetails ? "true" : "false");
+    mapViewToggle?.setAttribute("aria-selected", selectedScope && !isDetails ? "true" : "false");
+    detailsViewToggle.disabled = !selectedScope;
+    mapViewToggle.disabled = !selectedScope;
+    selectedScopeToggle?.classList.toggle("active", selectedScope);
+    resultsScopeToggle?.classList.toggle("active", !selectedScope);
+    selectedScopeToggle?.setAttribute("aria-selected", selectedScope ? "true" : "false");
+    resultsScopeToggle?.setAttribute("aria-selected", !selectedScope ? "true" : "false");
+    if (detailsHeading) {
+        if (!selectedScope) {
+            detailsHeading.textContent = "All Results Map";
+        } else {
+            detailsHeading.textContent = isDetails ? "Resource Details" : "Resource Map";
+        }
+    }
+}
+
+function getMappableResources(resources) {
+    return (Array.isArray(resources) ? resources : []).filter(resource => {
+        if (resource?.IncludeInMap === false) return false;
+        const latitude = Number.parseFloat(normalizeString(resource?.Latitude));
+        const longitude = Number.parseFloat(normalizeString(resource?.Longitude));
+        return Number.isFinite(latitude) && Number.isFinite(longitude);
+    });
+}
+
+function renderMapPlaceholder() {
+    renderDetailsShell();
+
+    const panel = document.createElement("div");
+    panel.className = "map-placeholder";
+
+    const isResultsScope = activeMapScope === "results";
+    const selectedResource = currentResultSet.find(resource => normalizeString(resource.id) === selectedResourceId);
+    panel.appendChild(createTextBlock(
+        "div",
+        "map-placeholder-title",
+        isResultsScope ? "All-results map will appear here." : "Selected-resource map will appear here."
+    ));
+    panel.appendChild(createTextBlock(
+        "div",
+        "map-placeholder-copy",
+        isResultsScope
+            ? "This panel is now reserved for the full filtered-results map. The next step will replace this placeholder with the actual Leaflet map and markers for every mappable result on the left."
+            : "This panel is now ready for the selected resource map. The next step will replace this placeholder with the actual Leaflet map centered on the currently selected resource."
+    ));
+
+    const stats = document.createElement("div");
+    stats.className = "map-placeholder-stats";
+    const mappableResources = getMappableResources(currentResultSet);
+    stats.appendChild(createTextBlock("div", "map-placeholder-stat", `${currentResultSet.length} current result${currentResultSet.length === 1 ? "" : "s"}`));
+    stats.appendChild(createTextBlock("div", "map-placeholder-stat", `${mappableResources.length} currently mappable`));
+    if (!isResultsScope && selectedResource) {
+        const selectedMappable = getMappableResources([selectedResource]).length === 1 ? "selected resource has coordinates" : "selected resource not yet mappable";
+        stats.appendChild(createTextBlock("div", "map-placeholder-stat", selectedMappable));
+    }
+    panel.appendChild(stats);
+    panel.appendChild(createTextBlock(
+        "div",
+        "map-placeholder-note",
+        isResultsScope
+            ? "This mode will map all currently filtered and included results."
+            : selectedResource
+                ? `Selected resource: ${normalizeString(selectedResource.Organization) || "No name"}`
+                : "Select a result on the left to keep the future list and map behavior aligned."
+    ));
+
+    rightPanelContent.appendChild(panel);
+}
+
+function refreshRightPanel(options = {}) {
+    const { focusPanel = false, updateHistory = true } = options;
+    const selectedResource = currentResultSet.find(resource => normalizeString(resource.id) === selectedResourceId);
+
+    if (activeMapScope === "results" || activeRightPanel === "map") {
+        renderMapPlaceholder();
+        if (updateHistory) updateUrlState();
+        if (focusPanel) detailsDiv?.focus();
+        return;
+    }
+
+    if (selectedResource) {
+        showDetails(selectedResource, {
+            focusDetails: focusPanel,
+            updateHistory
+        });
+        return;
+    }
+
+    renderDetailsEmptyState();
+    if (updateHistory) updateUrlState();
+}
+
 function renderDetailsEmptyState() {
     renderDetailsShell();
 
@@ -420,7 +534,7 @@ function renderDetailsEmptyState() {
     small.textContent = "Use the search bar or filters above to find a resource, then select it to view full details.";
     empty.appendChild(small);
 
-    detailsDiv.appendChild(empty);
+    rightPanelContent.appendChild(empty);
 }
 
 function renderStatusCard(container, message) {
@@ -445,7 +559,7 @@ function appendDetailField(label, value, options = {}) {
             richTextWrap.textContent = "";
         }
         field.appendChild(richTextWrap);
-        detailsDiv.appendChild(field);
+        rightPanelContent.appendChild(field);
         return;
     }
 
@@ -461,12 +575,12 @@ function appendDetailField(label, value, options = {}) {
         } else {
             field.appendChild(document.createTextNode(normalizeString(value)));
         }
-        detailsDiv.appendChild(field);
+        rightPanelContent.appendChild(field);
         return;
     }
 
     field.appendChild(document.createTextNode(normalizeString(value)));
-    detailsDiv.appendChild(field);
+    rightPanelContent.appendChild(field);
 }
 
 function appendDetailListField(label, values, options = {}) {
@@ -531,7 +645,7 @@ function appendDetailListField(label, values, options = {}) {
     });
 
     field.appendChild(list);
-    detailsDiv.appendChild(field);
+    rightPanelContent.appendChild(field);
 }
 
 function sortByOrganizationInPlace(list) {
@@ -558,8 +672,7 @@ function renderResults(resources) {
     if (resources.length === 0) {
         selectedResourceId = null;
         renderStatusCard(resultsDiv, "No results found.");
-        renderDetailsEmptyState();
-        updateUrlState();
+        refreshRightPanel({ updateHistory: true });
         return;
     }
 
@@ -591,11 +704,10 @@ function renderResults(resources) {
 
     const selectedResource = resources.find(resource => normalizeString(resource.id) === selectedResourceId);
     if (selectedResource) {
-        showDetails(selectedResource, { focusDetails: false, updateHistory: false });
+        refreshRightPanel({ focusPanel: false, updateHistory: false });
     } else {
         selectedResourceId = null;
-        renderDetailsEmptyState();
-        updateUrlState();
+        refreshRightPanel({ focusPanel: false, updateHistory: true });
     }
 }
 
@@ -617,8 +729,19 @@ function showDetails(resource, options = {}) {
     });
 
     selectedResourceId = resourceId;
+    if (activeMapScope === "results" || activeRightPanel === "map") {
+        renderMapPlaceholder();
+        if (updateHistory) {
+            updateUrlState();
+        }
+        if (focusDetails) {
+            detailsDiv.focus();
+        }
+        return;
+    }
+
     renderDetailsShell();
-    detailsDiv.appendChild(
+    rightPanelContent.appendChild(
         createTextBlock("div", "details-title", normalizeString(resource.Organization) || "No name")
     );
 
@@ -787,6 +910,7 @@ async function applyFilters(options = {}) {
 // -----------------------------
 async function init() {
     renderStatusCard(resultsDiv, "Loading...");
+    updateRightPanelToggleUi();
     renderDetailsEmptyState();
     updateResultCount(0);
 
@@ -825,6 +949,8 @@ async function init() {
     subcategorySelect.value = initialState.category === "all" ? "all" : initialState.subcategory;
     searchInput.value = initialState.search;
     selectedResourceId = initialState.selectedId;
+    activeRightPanel = initialState.view;
+    activeMapScope = initialState.scope;
     activeFilters = {
         search: initialState.search,
         category: initialState.category,
@@ -871,6 +997,30 @@ if (brandHomeLink) {
     brandHomeLink.addEventListener("click", handleHomeClick);
 }
 
+detailsViewToggle?.addEventListener("click", () => {
+    if (activeRightPanel === "details") return;
+    activeRightPanel = "details";
+    refreshRightPanel({ focusPanel: true, updateHistory: true });
+});
+
+mapViewToggle?.addEventListener("click", () => {
+    if (activeRightPanel === "map") return;
+    activeRightPanel = "map";
+    refreshRightPanel({ focusPanel: true, updateHistory: true });
+});
+
+selectedScopeToggle?.addEventListener("click", () => {
+    if (activeMapScope === "selected") return;
+    activeMapScope = "selected";
+    refreshRightPanel({ focusPanel: true, updateHistory: true });
+});
+
+resultsScopeToggle?.addEventListener("click", () => {
+    if (activeMapScope === "results") return;
+    activeMapScope = "results";
+    refreshRightPanel({ focusPanel: true, updateHistory: true });
+});
+
 window.addEventListener("popstate", () => {
     const nextState = getUrlState();
     searchInput.value = nextState.search;
@@ -878,6 +1028,8 @@ window.addEventListener("popstate", () => {
     populateSubcategoryFilterForCategory(nextState.category);
     subcategorySelect.value = nextState.category === "all" ? "all" : nextState.subcategory;
     selectedResourceId = nextState.selectedId;
+    activeRightPanel = nextState.view;
+    activeMapScope = nextState.scope;
     activeFilters = {
         search: nextState.search,
         category: nextState.category,
