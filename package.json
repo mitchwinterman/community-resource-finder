@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "set-admin-claim": "node tools/set_admin_claim.mjs",
-    "mail-worker": "node tools/mail_worker.mjs"
+    "mail-worker": "node tools/mail_worker.mjs",
+    "coordinate-backfill": "node tools/coordinate_backfill.mjs"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0"

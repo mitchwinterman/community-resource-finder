@@ -73,6 +73,7 @@ const orgEditableResourceFields = [
   "Zip",
   "Latitude",
   "Longitude",
+  "IncludeInMap",
   "Hours",
   "Eligibility",
   "Cost",
@@ -110,6 +111,16 @@ function normalizeCoordinateValue(value) {
 
   const parsed = Number.parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : normalized;
+}
+
+function normalizeMapIncludeValue(value, defaultValue = true) {
+  if (typeof value === "boolean") return value;
+
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return defaultValue;
+  if (["true", "yes", "y", "1", "include"].includes(normalized)) return true;
+  if (["false", "no", "n", "0", "exclude"].includes(normalized)) return false;
+  return defaultValue;
 }
 
 function normalizeRequestStatus(value) {
@@ -515,6 +526,21 @@ function buildFieldDate(fieldKey, label, value = "") {
   return wrap;
 }
 
+function buildFieldBooleanSelect(fieldKey, label, value = true, trueLabel = "Yes", falseLabel = "No") {
+  const wrap = createEl("div", {
+    className: "field-group",
+    attrs: { "data-field": fieldKey, "data-type": "select" }
+  });
+  const lbl = createEl("label", { className: "field-label", text: label });
+  const select = createEl("select");
+  select.appendChild(createEl("option", { text: trueLabel, attrs: { value: "true" } }));
+  select.appendChild(createEl("option", { text: falseLabel, attrs: { value: "false" } }));
+  select.value = normalizeMapIncludeValue(value, true) ? "true" : "false";
+  wrap.appendChild(lbl);
+  wrap.appendChild(select);
+  return wrap;
+}
+
 function buildFieldRichText(fieldKey, label, htmlValue = "", deltaValue = null) {
   const wrap = createEl("div", {
     className: "field-group quill-field",
@@ -728,6 +754,7 @@ function buildResourceForm(resource) {
   resourceForm.appendChild(buildFieldText("Zip", "Zip", resource.Zip || "", false));
   resourceForm.appendChild(buildFieldText("Latitude", "Latitude", resource.Latitude ?? "", false));
   resourceForm.appendChild(buildFieldText("Longitude", "Longitude", resource.Longitude ?? "", false));
+  resourceForm.appendChild(buildFieldBooleanSelect("IncludeInMap", "Include in Map", resource.IncludeInMap ?? true, "Include", "Don't Include"));
   resourceForm.appendChild(buildFieldText("Hours", "Hours", resource.Hours || "", false));
   resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", resource.Eligibility || "", false));
   resourceForm.appendChild(buildFieldText("Cost", "Cost", resource.Cost || "", false));
@@ -788,6 +815,11 @@ function collectProposedData() {
           return label ? { label, number } : { number };
         })
         .filter(Boolean);
+      return;
+    }
+
+    if (field === "IncludeInMap") {
+      payload[field] = normalizeMapIncludeValue(group.querySelector("select")?.value, true);
       return;
     }
 

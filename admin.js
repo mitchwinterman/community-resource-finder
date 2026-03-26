@@ -264,6 +264,7 @@ const orgEditableResourceFields = [
   "Zip",
   "Latitude",
   "Longitude",
+  "IncludeInMap",
   "Hours",
   "Eligibility",
   "Cost",
@@ -286,6 +287,7 @@ const requestReviewFieldConfig = [
   { field: "Zip", label: "Zip" },
   { field: "Latitude", label: "Latitude" },
   { field: "Longitude", label: "Longitude" },
+  { field: "IncludeInMap", label: "Include in Map", type: "boolean" },
   { field: "Hours", label: "Hours" },
   { field: "Eligibility", label: "Eligibility" },
   { field: "Cost", label: "Cost" },
@@ -325,6 +327,16 @@ function normalizeCoordinateValue(value) {
 
   const parsed = Number.parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : normalized;
+}
+
+function normalizeMapIncludeValue(value, defaultValue = true) {
+  if (typeof value === "boolean") return value;
+
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized) return defaultValue;
+  if (["true", "yes", "y", "1", "include"].includes(normalized)) return true;
+  if (["false", "no", "n", "0", "exclude"].includes(normalized)) return false;
+  return defaultValue;
 }
 
 function normalizeBaseUrl(value) {
@@ -1310,6 +1322,7 @@ function buildRequestEditFieldset(data) {
   requestEditForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
   requestEditForm.appendChild(buildFieldText("Latitude", "Latitude", data.Latitude ?? "", false));
   requestEditForm.appendChild(buildFieldText("Longitude", "Longitude", data.Longitude ?? "", false));
+  requestEditForm.appendChild(buildFieldBooleanSelect("IncludeInMap", "Include in Map", data.IncludeInMap ?? true, "Include", "Don't Include"));
   requestEditForm.appendChild(buildGeocodeHelper(requestEditForm));
   requestEditForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
   requestEditForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
@@ -1754,7 +1767,7 @@ function getFormFieldValue(formEl, fieldName) {
 }
 
 function setFormFieldValue(formEl, fieldName, value) {
-  const input = getFormFieldInput(formEl, fieldName);
+  const input = formEl?.querySelector(`.field-group[data-field="${fieldName}"] input, .field-group[data-field="${fieldName}"] select`) || null;
   if (input) {
     input.value = normalizeString(value);
   }
@@ -1915,6 +1928,19 @@ function buildFieldSelect(fieldKey, label, value = "", options = [], placeholder
   wrap.appendChild(lbl);
   wrap.appendChild(select);
   return wrap;
+}
+
+function buildFieldBooleanSelect(fieldKey, label, value = true, trueLabel = "Yes", falseLabel = "No") {
+  return buildFieldSelect(
+    fieldKey,
+    label,
+    normalizeMapIncludeValue(value, true) ? "true" : "false",
+    [
+      { value: "true", label: trueLabel },
+      { value: "false", label: falseLabel }
+    ],
+    "Select an option"
+  );
 }
 
 function buildReadOnlyMetaField(label, value) {
@@ -2197,6 +2223,7 @@ function buildResourceForm(data) {
   resourceForm.appendChild(buildFieldText("Zip", "Zip", data.Zip || "", false));
   resourceForm.appendChild(buildFieldText("Latitude", "Latitude", data.Latitude ?? "", false));
   resourceForm.appendChild(buildFieldText("Longitude", "Longitude", data.Longitude ?? "", false));
+  resourceForm.appendChild(buildFieldBooleanSelect("IncludeInMap", "Include in Map", data.IncludeInMap ?? true, "Include", "Don't Include"));
   resourceForm.appendChild(buildGeocodeHelper(resourceForm));
   resourceForm.appendChild(buildFieldText("Hours", "Hours", data.Hours || "", false));
   resourceForm.appendChild(buildFieldText("Eligibility", "Eligibility", data.Eligibility || "", false));
@@ -2299,6 +2326,10 @@ function collectResourcePayload() {
     }
 
     const input = g.querySelector("input, textarea, select");
+    if (field === "IncludeInMap") {
+      payload[field] = normalizeMapIncludeValue(input?.value, true);
+      continue;
+    }
     payload[field] = input ? normalizeString(input.value) : "";
   }
 

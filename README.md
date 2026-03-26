@@ -51,6 +51,7 @@ Top-level files:
 - `tools/mail_worker.mjs`: recurring outbound mail worker that drains `mail_queue` through Outlook Desktop
 - `tools/send_outlook_mail.ps1`: Outlook COM bridge used by the mail worker on Windows
 - `tools/run_mail_worker.ps1`: scheduler-friendly wrapper that sets env vars and launches the Outlook mail worker
+- `tools/coordinate_backfill.mjs`: one-time coordinate backfill script for previewing and writing `Latitude` / `Longitude` on existing resources
 - `firebase.js`: Firebase app, Firestore, and Auth initialization
 - `data.json`: legacy resource data snapshot retained for reference
 - `categories.json`: canonical category/subcategory snapshot retained for reference
@@ -188,6 +189,7 @@ Notes:
 - `Websites` is stored as an array of strings.
 - `PhoneNumbers` is stored as an array of objects with `number` and optional `label`.
 - `Latitude` and `Longitude` can be stored as numeric coordinates for future map support.
+- `IncludeInMap` can be stored as a boolean to explicitly include or exclude a resource from the future multi-resource map.
 - `Website` and `Phone` are legacy fields and should remain blank after migration.
 - `Last Verified` is stored as a string in `YYYY-MM-DD` format when entered through the admin UI.
 - `organizationId` links a resource to its owning document in `organizations`.
@@ -728,7 +730,39 @@ When saving categories, known deprecated subcategory labels are automatically no
 
 When saving resources, websites are saved in `Websites`, and phone entries are saved in `PhoneNumbers` with optional labels such as `Main`, `Office`, or `Cell`. The legacy `Website` and `Phone` fields are cleared.
 
-The admin resource editor and request-review editor now include a `Geocode Address` helper that looks up `Latitude` and `Longitude` from the current address fields.
+The admin resource editor and request-review editor now include a `Geocode Address` helper that looks up `Latitude` and `Longitude` from the current address fields. Those forms also include an `Include in Map` toggle so staff can explicitly exclude records from the future multi-resource map even when coordinates exist.
+
+### One-Time Coordinate Backfill
+
+For existing records, use the one-time coordinate backfill script in `tools/coordinate_backfill.mjs`.
+
+It:
+
+1. scans all `resources`
+2. skips any resource that already has valid `Latitude` and `Longitude`
+3. tries several forgiving geocode query variants based on `Address`, `City`, and `Zip`
+4. writes failures to a local report for manual cleanup
+
+Preview mode:
+
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\service-account.json"
+npm.cmd run coordinate-backfill
+```
+
+Run mode:
+
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\service-account.json"
+npm.cmd run coordinate-backfill -- --run true
+```
+
+Optional flags:
+
+- `--limit 25`: test against a smaller subset first
+- `--report C:\path\to\report.json`: choose a custom report path
+
+By default, reports are written to `tools/reports/`.
 
 ### Organization Management
 

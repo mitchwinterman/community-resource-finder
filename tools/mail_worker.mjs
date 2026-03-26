@@ -56,6 +56,7 @@ const reviewRequestEditableFields = [
   "Zip",
   "Latitude",
   "Longitude",
+  "IncludeInMap",
   "Hours",
   "Eligibility",
   "Cost",
