@@ -41,6 +41,7 @@ const submitterNotesInput = document.getElementById("submitter-notes");
 const submitRequestBtn = document.getElementById("submit-request-btn");
 const cancelResourceBtn = document.getElementById("cancel-resource-btn");
 const requestList = document.getElementById("request-list");
+const addResourceBtn = document.getElementById("add-resource-btn");
 
 let membershipDoc = null;
 let organizationDoc = null;
@@ -48,6 +49,7 @@ let categoryMeta = [];
 let resourceMeta = [];
 let requestMeta = [];
 let editingResource = null;
+let editingResourceMode = "edit";
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -78,7 +80,6 @@ const orgEditableResourceFields = [
   "Eligibility",
   "Cost",
   "Languages",
-  "Last Verified",
   "Notes",
   "NotesDelta"
 ];
@@ -127,6 +128,20 @@ function normalizeRequestStatus(value) {
   const status = normalizeString(value).toLowerCase();
   if (status === "approved" || status === "rejected") return status;
   return "pending";
+}
+
+function normalizeRequestType(value) {
+  const requestType = normalizeString(value).toLowerCase();
+  if (requestType === "resource_create") return "resource_create";
+  if (requestType === "quarterly_confirmation") return "quarterly_confirmation";
+  return "resource_edit";
+}
+
+function getRequestTypeLabel(value) {
+  const requestType = normalizeRequestType(value);
+  if (requestType === "resource_create") return "New resource";
+  if (requestType === "quarterly_confirmation") return "Quarterly confirmation";
+  return "Resource update";
 }
 
 function formatRequestTimestamp(value) {
@@ -479,6 +494,7 @@ function renderRequestList(requests) {
         className: "list-row-meta",
         text: [
           section.label,
+          getRequestTypeLabel(requestDoc.requestType),
           normalizeString(requestDoc.submittedByEmail) || normalizeString(requestDoc.submittedByUid),
           formatRequestTimestamp(requestDoc.createdAt)
         ].filter(Boolean).join(" | ")
@@ -760,9 +776,12 @@ function buildResourceForm(resource) {
   resourceForm.appendChild(buildFieldText("Cost", "Cost", resource.Cost || "", false));
   resourceForm.appendChild(buildFieldText("Languages", "Languages", resource.Languages || "", false));
   resourceForm.appendChild(buildFieldText("Keywords", "Keywords", resource.Keywords || "", false));
-  resourceForm.appendChild(buildFieldDate("Last Verified", "Last Verified", resource["Last Verified"] || ""));
 
-  editorTitle.textContent = `Submit Update: ${normalizeString(resource.Organization) || "Resource"}`;
+  const resourceName = normalizeString(resource.Organization) || "Resource";
+  editorTitle.textContent = editingResourceMode === "create"
+    ? "Submit New Resource"
+    : `Submit Update: ${resourceName}`;
+  submitRequestBtn.textContent = editingResourceMode === "create" ? "Submit New Resource" : "Submit for Review";
 }
 
 function collectProposedData() {
@@ -834,7 +853,41 @@ function collectProposedData() {
 
 function openResourceEditor(resource) {
   editingResource = resource;
+  editingResourceMode = "edit";
   buildResourceForm(resource);
+  show(resourceEditor);
+}
+
+function createNewResourceDraft() {
+  return {
+    Organization: "",
+    Description: "",
+    DescriptionDelta: null,
+    Categories: [],
+    Subcategories: [],
+    Websites: [],
+    PhoneNumbers: [],
+    Email: "",
+    Address: "",
+    City: "",
+    Zip: "",
+    Latitude: "",
+    Longitude: "",
+    IncludeInMap: true,
+    Hours: "",
+    Eligibility: "",
+    Cost: "",
+    Languages: "",
+    Keywords: "",
+    Notes: "",
+    NotesDelta: null
+  };
+}
+
+function openNewResourceEditor() {
+  editingResource = createNewResourceDraft();
+  editingResourceMode = "create";
+  buildResourceForm(editingResource);
   show(resourceEditor);
 }
 
@@ -849,6 +902,11 @@ logoutBtn?.addEventListener("click", async () => {
 cancelResourceBtn?.addEventListener("click", () => {
   hide(resourceEditor);
   editingResource = null;
+  editingResourceMode = "edit";
+});
+
+addResourceBtn?.addEventListener("click", () => {
+  openNewResourceEditor();
 });
 
 submitRequestBtn?.addEventListener("click", async () => {
@@ -863,14 +921,18 @@ submitRequestBtn?.addEventListener("click", async () => {
   const actor = getCurrentActor();
   const proposedData = sanitizeRequestedResourceData(collectProposedData());
   const submitterNotes = normalizeString(submitterNotesInput.value);
+  const requestType = editingResourceMode === "create" ? "resource_create" : "resource_edit";
+  const resourceName = normalizeString(proposedData.Organization) || normalizeString(editingResource.Organization);
+  const relatedResourceId = editingResourceMode === "edit" ? normalizeString(editingResource.id) : "";
 
   try {
     const requestRef = await addDoc(collection(db, "resource_change_requests"), {
-      resourceId: editingResource.id,
-      resourceName: normalizeString(editingResource.Organization),
+      resourceId: relatedResourceId,
+      resourceName,
       organizationId: normalizeString(membershipDoc.organizationId),
       submittedByUid: actor.uid,
       submittedByEmail: actor.email,
+      requestType,
       status: "pending",
       proposedData,
       submitterNotes,
@@ -883,20 +945,24 @@ submitRequestBtn?.addEventListener("click", async () => {
       action: "request.submitted",
       entityType: "request",
       entityId: requestRef.id,
-      entityLabel: normalizeString(editingResource.Organization),
+      entityLabel: resourceName,
       organizationId: normalizeString(membershipDoc.organizationId),
-      relatedResourceId: editingResource.id,
+      relatedResourceId,
       relatedRequestId: requestRef.id,
-      summary: `Submitted update request for ${normalizeString(editingResource.Organization) || requestRef.id}`,
+      summary: `${editingResourceMode === "create" ? "Submitted new resource request for" : "Submitted update request for"} ${resourceName || requestRef.id}`,
       details: {
+        requestType,
         submitterNotes,
         changedFieldCount: Object.keys(proposedData).length
       }
     });
 
-    alert("Update submitted for library review.");
+    alert(editingResourceMode === "create"
+      ? "New resource submitted for library review."
+      : "Update submitted for library review.");
     hide(resourceEditor);
     editingResource = null;
+    editingResourceMode = "edit";
     await loadRequests();
     await loadOwnedResources();
   } catch (err) {

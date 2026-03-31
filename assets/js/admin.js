@@ -271,7 +271,6 @@ const orgEditableResourceFields = [
   "Eligibility",
   "Cost",
   "Languages",
-  "Last Verified",
   "Notes",
   "NotesDelta"
 ];
@@ -295,7 +294,6 @@ const requestReviewFieldConfig = [
   { field: "Cost", label: "Cost" },
   { field: "Languages", label: "Languages" },
   { field: "Keywords", label: "Keywords" },
-  { field: "Last Verified", label: "Last Verified" },
 ];
 
 // ------------------------------------------------------
@@ -422,6 +420,27 @@ function formatDateOnly(value) {
   return dateValue ? dateValue.toLocaleDateString() : "";
 }
 
+function getTodayYyyyMmDd(value = new Date()) {
+  const dateValue = value instanceof Date ? value : getValueDate(value) || new Date();
+  const year = dateValue.getFullYear();
+  const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+  const day = String(dateValue.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseStoredReviewDate(value) {
+  const isoDate = parseYyyyMmDd(value);
+  if (isoDate) return isoDate;
+
+  const fallback = getValueDate(value);
+  return fallback instanceof Date ? fallback : null;
+}
+
+function formatStoredReviewDate(value) {
+  const parsed = parseStoredReviewDate(value);
+  return parsed ? parsed.toLocaleDateString() : normalizeString(value);
+}
+
 function formatDaysAgo(dateValue) {
   if (!(dateValue instanceof Date)) return "";
   const diffMs = Date.now() - dateValue.getTime();
@@ -430,14 +449,21 @@ function formatDaysAgo(dateValue) {
 }
 
 function getResourceReviewAnchor(resource) {
-  const candidates = [
-    { source: "Last Verified", date: parseYyyyMmDd(resource?.["Last Verified"]) },
+  const verifiedDate = parseStoredReviewDate(resource?.["Last Verified"]);
+  if (verifiedDate instanceof Date) {
+    return {
+      source: "Last Verified",
+      date: verifiedDate,
+      displayValue: formatStoredReviewDate(resource?.["Last Verified"])
+    };
+  }
+
+  const fallbackCandidates = [
     { source: "Last Approved", date: getValueDate(resource?.lastApprovedAt) },
-    { source: "Last Submitted", date: getValueDate(resource?.lastSubmittedAt) },
     { source: "Created", date: getValueDate(resource?.createdAt) }
   ].filter(candidate => candidate.date instanceof Date);
 
-  if (!candidates.length) {
+  if (!fallbackCandidates.length) {
     return {
       source: "",
       date: null,
@@ -445,16 +471,11 @@ function getResourceReviewAnchor(resource) {
     };
   }
 
-  const latest = candidates.reduce((best, candidate) =>
-    !best || candidate.date.getTime() > best.date.getTime() ? candidate : best
-  , null);
-
+  const fallback = fallbackCandidates[0];
   return {
-    source: latest.source,
-    date: latest.date,
-    displayValue: latest.source === "Last Verified"
-      ? normalizeString(resource?.["Last Verified"])
-      : formatTimestampValue(latest.date)
+    source: fallback.source,
+    date: fallback.date,
+    displayValue: formatTimestampValue(fallback.date)
   };
 }
 
@@ -508,8 +529,9 @@ function getMembershipSummary(membership) {
 function getRequestSummaryText(requestDoc) {
   const orgName = getOrganizationNameById(requestDoc.organizationId) || "(Unknown organization)";
   const resourceName = normalizeString(requestDoc.resourceName) || "(Unnamed resource)";
+  const requestType = getRequestTypeLabel(requestDoc.requestType);
   const status = getRequestStatusLabel(requestDoc.status);
-  return `${resourceName} | ${orgName} | ${status}`;
+  return `${resourceName} | ${orgName} | ${requestType} | ${status}`;
 }
 
 function normalizeRequestStatus(value) {
@@ -523,6 +545,20 @@ function getRequestStatusLabel(value) {
   if (status === "approved") return "accepted";
   if (status === "rejected") return "rejected";
   return "pending";
+}
+
+function normalizeRequestType(value) {
+  const requestType = normalizeString(value).toLowerCase();
+  if (requestType === "resource_create") return "resource_create";
+  if (requestType === "quarterly_confirmation") return "quarterly_confirmation";
+  return "resource_edit";
+}
+
+function getRequestTypeLabel(value) {
+  const requestType = normalizeRequestType(value);
+  if (requestType === "resource_create") return "New resource";
+  if (requestType === "quarterly_confirmation") return "Quarterly no-change confirmation";
+  return "Resource update";
 }
 
 function normalizeMailStatus(value) {
@@ -570,15 +606,17 @@ function buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes) {
     return null;
   }
 
+  const requestType = normalizeRequestType(requestDoc?.requestType);
   const resourceName = normalizeString(requestDoc?.resourceName) || "your resource update";
   const requestId = normalizeString(requestDoc?.id);
   const resourceId = normalizeString(requestDoc?.resourceId);
   const reviewedAt = new Date().toLocaleString();
   const orgPortalUrl = getPortalUrl();
+  const requestSubjectLabel = requestType === "resource_create" ? "resource submission" : "update";
   const intro = status === "approved"
-    ? `Your Community Resource Finder update for "${resourceName}" has been approved.`
-    : `Your Community Resource Finder update for "${resourceName}" has been rejected.`;
-  const subject = `[CRF] Update ${status}: ${resourceName}`;
+    ? `Your Community Resource Finder ${requestSubjectLabel} for "${resourceName}" has been approved.`
+    : `Your Community Resource Finder ${requestSubjectLabel} for "${resourceName}" has been rejected.`;
+  const subject = `[CRF] ${requestType === "resource_create" ? "Resource" : "Update"} ${status}: ${resourceName}`;
   const notesText = normalizeString(reviewNotes);
 
   const text = [
@@ -671,6 +709,14 @@ function getFilteredRequests() {
   return requestMeta.filter(requestDoc => normalizeRequestStatus(requestDoc.status) === activeRequestFilter);
 }
 
+function updateRequestNavAlert() {
+  const requestNavBtn = navButtons.find(btn => btn.dataset.panel === "requests");
+  if (!requestNavBtn) return;
+
+  const pendingCount = requestMeta.filter(requestDoc => normalizeRequestStatus(requestDoc.status) === "pending").length;
+  requestNavBtn.classList.toggle("attention", pendingCount > 0);
+}
+
 function updateRequestSelectionUi() {
   if (!requestSelectionCount) return;
 
@@ -696,6 +742,8 @@ function updateRequestFilterUi() {
     btn.textContent = `${label} (${count})`;
     btn.classList.toggle("active", activeRequestFilter === status);
   });
+
+  updateRequestNavAlert();
 }
 
 function setActiveRequestFilter(nextFilter) {
@@ -1095,13 +1143,10 @@ function buildRequestMetaBlock(requestDoc) {
   block.appendChild(createEl("h4", { text: "Request Summary" }));
 
   const metaList = createEl("div", { className: "request-meta-list" });
-  const requestType = normalizeString(requestDoc.requestType) === "quarterly_confirmation"
-    ? "Quarterly no-change confirmation"
-    : "Resource edit request";
   const rows = [
     ["Resource", normalizeString(requestDoc.resourceName) || "(Unnamed resource)"],
     ["Organization", getOrganizationNameById(requestDoc.organizationId) || requestDoc.organizationId || "(Unknown organization)"],
-    ["Request type", requestType],
+    ["Request type", getRequestTypeLabel(requestDoc.requestType)],
     ["Status", getRequestStatusLabel(requestDoc.status)],
     ["Submitted by", normalizeString(requestDoc.submittedByEmail) || normalizeString(requestDoc.submittedByUid) || "(Unknown user)"],
     ["Submitted at", formatTimestampValue(requestDoc.createdAt)],
@@ -1355,7 +1400,6 @@ function buildRequestEditFieldset(data) {
   requestEditForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
   requestEditForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
   requestEditForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
-  requestEditForm.appendChild(buildFieldDate("Last Verified", "Last Verified", data["Last Verified"] || ""));
 }
 
 function collectRequestEditPayload() {
@@ -2284,7 +2328,6 @@ function buildResourceForm(data) {
   resourceForm.appendChild(buildFieldText("Cost", "Cost", data.Cost || "", false));
   resourceForm.appendChild(buildFieldText("Languages", "Languages", data.Languages || "", false));
   resourceForm.appendChild(buildFieldText("Keywords", "Keywords", data.Keywords || "", false));
-  resourceForm.appendChild(buildFieldDate("Last Verified", "Last Verified", data["Last Verified"] || ""));
   resourceForm.appendChild(buildFieldSelect(
     "status",
     "Publication Status",
@@ -2311,6 +2354,7 @@ function buildResourceForm(data) {
   resourceForm.appendChild(buildFieldText("UpdatedBy", "Updated By", data.UpdatedBy || "", false));
 
   if (editingResourceId) {
+    resourceForm.appendChild(buildReadOnlyMetaField("Verification Date", formatStoredReviewDate(data["Last Verified"]) || "-"));
     resourceForm.appendChild(buildReadOnlyMetaField("Created", formatTimestampValue(data.createdAt)));
     resourceForm.appendChild(buildReadOnlyMetaField("Last Submitted", formatTimestampValue(data.lastSubmittedAt)));
     resourceForm.appendChild(buildReadOnlyMetaField("Last Approved", formatTimestampValue(data.lastApprovedAt)));
@@ -2403,6 +2447,10 @@ saveResourceBtn?.addEventListener("click", async () => {
   const payload = collectResourcePayload();
   const actor = getCurrentActorMetadata();
   const isNew = !editingResourceId;
+  const previousData = editingResourceData ? { ...editingResourceData } : {};
+  const changedFields = editingResourceId
+    ? getChangedFieldNames(previousData, payload, Object.keys(payload))
+    : Object.keys(payload).filter(field => normalizeRequestComparableValue(payload[field]));
 
   payload.status = normalizeString(payload.status) || "published";
   payload.submissionState = normalizeString(payload.submissionState) || "approved";
@@ -2428,7 +2476,18 @@ saveResourceBtn?.addEventListener("click", async () => {
     payload.lastSubmittedBy = actor.uid;
   }
 
-  if (payload.status === "published" && payload.submissionState === "approved" && !editingResourceData?.lastApprovedAt) {
+  if (!isNew && changedFields.length) {
+    const shouldUpdateVerificationDate = window.confirm("Update verification date to today?");
+    if (shouldUpdateVerificationDate) {
+      payload["Last Verified"] = getTodayYyyyMmDd();
+    }
+  }
+
+  if (isNew && payload.status === "published" && payload.submissionState === "approved") {
+    payload["Last Verified"] = getTodayYyyyMmDd();
+  }
+
+  if (payload.status === "published" && payload.submissionState === "approved") {
     payload.lastApprovedAt = serverTimestamp();
     payload.lastApprovedBy = actor.uid;
   }
@@ -2438,7 +2497,6 @@ saveResourceBtn?.addEventListener("click", async () => {
     let savedResourceId = editingResourceId;
 
     if (editingResourceId) {
-      const previousData = editingResourceData ? { ...editingResourceData } : {};
       await updateDoc(doc(db, "resources", editingResourceId), payload);
       await logAuditEvent({
         area: "directory",
@@ -4356,9 +4414,15 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
   if (!requestDoc) return;
 
   const actor = getCurrentActorMetadata();
+  const requestType = normalizeRequestType(requestDoc.requestType);
   const effectiveProposedData = sanitizeRequestedResourceData(overrideProposedData || requestDoc.proposedData);
+  const effectiveResourceName = normalizeString(effectiveProposedData.Organization) || normalizeString(requestDoc.resourceName);
+  let effectiveResourceId = normalizeString(requestDoc.resourceId);
 
   if (nextStatus === "approved") {
+    const verificationDate = requestType === "quarterly_confirmation"
+      ? getTodayYyyyMmDd(getValueDate(requestDoc.reviewConfirmedAt) || new Date())
+      : getTodayYyyyMmDd();
     const resourcePayload = {
       ...effectiveProposedData,
       organizationId: normalizeString(requestDoc.organizationId),
@@ -4370,19 +4434,29 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
       lastSubmittedAt: requestDoc.createdAt || serverTimestamp(),
       lastSubmittedBy: normalizeString(requestDoc.submittedByUid),
       lastApprovedAt: serverTimestamp(),
-      lastApprovedBy: actor.uid
+      lastApprovedBy: actor.uid,
+      "Last Verified": verificationDate
     };
 
-    if (normalizeString(requestDoc.requestType) === "quarterly_confirmation") {
-      const confirmationDate = getValueDate(requestDoc.reviewConfirmedAt) || new Date();
-      resourcePayload["Last Verified"] = formatDateOnly(confirmationDate);
+    if (requestType === "quarterly_confirmation") {
       resourcePayload.UpdatedBy = "Quarterly review confirmation";
     }
 
-    await updateDoc(doc(db, "resources", requestDoc.resourceId), resourcePayload);
+    if (requestType === "resource_create" || !effectiveResourceId) {
+      resourcePayload.createdAt = serverTimestamp();
+      resourcePayload.createdByUid = actor.uid;
+      resourcePayload.createdByEmail = actor.email;
+      const createdRef = await addDoc(collection(db, "resources"), resourcePayload);
+      effectiveResourceId = createdRef.id;
+    } else {
+      await updateDoc(doc(db, "resources", effectiveResourceId), resourcePayload);
+    }
   }
 
   await updateDoc(doc(db, "resource_change_requests", requestDoc.id), {
+    resourceId: effectiveResourceId,
+    resourceName: effectiveResourceName,
+    requestType,
     status: nextStatus,
     reviewNotes,
     proposedData: effectiveProposedData,
@@ -4392,7 +4466,15 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
     updatedAt: serverTimestamp()
   });
 
-  const mailPayload = buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes);
+  const reviewedRequestDoc = {
+    ...requestDoc,
+    resourceId: effectiveResourceId,
+    resourceName: effectiveResourceName,
+    requestType,
+    proposedData: effectiveProposedData
+  };
+
+  const mailPayload = buildRequestStatusMailPayload(reviewedRequestDoc, nextStatus, reviewNotes);
   if (mailPayload) {
     const mailRef = await addDoc(collection(db, "mail_queue"), {
       ...mailPayload,
@@ -4405,11 +4487,11 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
       entityType: "mail_queue",
       entityId: mailRef.id,
       entityLabel: normalizeString(mailPayload.subject),
-      organizationId: normalizeString(requestDoc.organizationId),
+      organizationId: normalizeString(reviewedRequestDoc.organizationId),
       relatedMailId: mailRef.id,
-      relatedRequestId: normalizeString(requestDoc.id),
-      relatedResourceId: normalizeString(requestDoc.resourceId),
-      summary: `Queued ${normalizeRequestStatus(nextStatus)} email for ${normalizeString(requestDoc.resourceName) || requestDoc.id}`,
+      relatedRequestId: normalizeString(reviewedRequestDoc.id),
+      relatedResourceId: normalizeString(reviewedRequestDoc.resourceId),
+      summary: `Queued ${normalizeRequestStatus(nextStatus)} email for ${normalizeString(reviewedRequestDoc.resourceName) || reviewedRequestDoc.id}`,
       details: {
         to: normalizeString(mailPayload.to),
         type: normalizeString(mailPayload.type)
@@ -4421,13 +4503,14 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
     area: "requests",
     action: `request.${normalizeRequestStatus(nextStatus)}`,
     entityType: "request",
-    entityId: normalizeString(requestDoc.id),
-    entityLabel: normalizeString(requestDoc.resourceName),
-    organizationId: normalizeString(requestDoc.organizationId),
-    relatedRequestId: normalizeString(requestDoc.id),
-    relatedResourceId: normalizeString(requestDoc.resourceId),
-    summary: `${normalizeRequestStatus(nextStatus) === "approved" ? "Approved" : "Rejected"} request for ${normalizeString(requestDoc.resourceName) || requestDoc.id}`,
+    entityId: normalizeString(reviewedRequestDoc.id),
+    entityLabel: normalizeString(reviewedRequestDoc.resourceName),
+    organizationId: normalizeString(reviewedRequestDoc.organizationId),
+    relatedRequestId: normalizeString(reviewedRequestDoc.id),
+    relatedResourceId: normalizeString(reviewedRequestDoc.resourceId),
+    summary: `${normalizeRequestStatus(nextStatus) === "approved" ? "Approved" : "Rejected"} request for ${normalizeString(reviewedRequestDoc.resourceName) || reviewedRequestDoc.id}`,
     details: {
+      requestType,
       reviewNotes: normalizeString(reviewNotes),
       editedBeforeApproval: Boolean(overrideProposedData && nextStatus === "approved")
     }

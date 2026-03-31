@@ -144,6 +144,17 @@ body {
   box-shadow: 0 6px 14px rgba(37, 99, 235, 0.25);
 }
 
+.nav-btn.attention {
+  background: #dc2626;
+  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.28);
+}
+
+.nav-btn.attention:hover,
+.nav-btn.attention.active {
+  background: #b91c1c;
+  box-shadow: 0 10px 22px rgba(185, 28, 28, 0.32);
+}
+
 /* ------------------------------------------------------
    PANELS + LAYOUT
 ------------------------------------------------------ */
