@@ -5,7 +5,8 @@
   "scripts": {
     "set-admin-claim": "node tools/set_admin_claim.mjs",
     "mail-worker": "node tools/mail_worker.mjs",
-    "coordinate-backfill": "node tools/coordinate_backfill.mjs"
+    "coordinate-backfill": "node tools/coordinate_backfill.mjs",
+    "copy-org-contacts": "node tools/copy_resource_contacts_to_orgs.mjs"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0"
