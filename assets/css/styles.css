@@ -343,6 +343,12 @@ select:focus {
     margin-top: 40px;
 }
 
+#rightPanelContent {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
 .map-view-panel {
     display: flex;
     flex-direction: column;
@@ -436,6 +442,7 @@ select:focus {
 .reset-btn:focus-visible,
 .header-action-btn:focus-visible,
 .header-action-link:focus-visible,
+.details-action-btn:focus-visible,
 .footer-right a:focus-visible,
 .brand-home-link:focus-visible,
 .wcls-link:focus-visible,
@@ -460,21 +467,197 @@ input[type="text"]:focus-visible {
 }
 
 /* Details */
+.details-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
 .details-title {
     font-family: "Poppins", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-weight: 650;
-    font-size: 20px;
-    margin-bottom: 10px;
+    font-size: 28px;
+    line-height: 1.15;
     color: #0f172a;
+    margin-bottom: 0;
+}
+
+.details-priority-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+}
+
+.details-section,
+.details-card {
+    padding: 18px 20px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.82);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+}
+
+.details-card {
+    background: rgba(255, 255, 255, 0.92);
+}
+
+.details-section-title,
+.details-card-title {
+    font-family: "Poppins", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    color: #102a43;
+    margin-bottom: 12px;
+}
+
+.details-section-body,
+.details-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 .details-field {
-    margin-bottom: 7px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
     font-size: 14px;
+    margin-bottom: 0;
+    min-width: 0;
 }
 
-.details-field strong {
-    color: #374151;
+.details-label,
+.details-chip-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.details-value {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #0f172a;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.details-value-pre {
+    white-space: pre-line;
+}
+
+.details-address {
+    font-weight: 600;
+}
+
+.details-list {
+    margin: 0;
+    padding-left: 1.2rem;
+    color: #0f172a;
+    min-width: 0;
+}
+
+.details-list li + li {
+    margin-top: 6px;
+}
+
+.details-list-plain {
+    list-style: none;
+    padding-left: 0;
+}
+
+.details-chip-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.details-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.details-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #e0ecff;
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.details-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.details-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 13px;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: 0.15s ease;
+}
+
+.details-action-btn:hover {
+    background: #dbeafe;
+    border-color: #93c5fd;
+}
+
+.details-action-btn-secondary {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+.details-action-btn-secondary:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+}
+
+.details-value a,
+.details-list a,
+.details-rich-text a {
+    color: #1d4ed8;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    overflow-wrap: anywhere;
+}
+
+.details-rich-text {
+    font-size: 14px;
+    line-height: 1.65;
+    color: #1f2937;
+}
+
+.details-rich-text p {
+    margin: 0 0 0.8rem;
+}
+
+.details-rich-text p:last-child {
+    margin-bottom: 0;
+}
+
+.details-rich-text ul,
+.details-rich-text ol {
+    margin: 0.5rem 0 0.5rem 0;
+    padding-left: 1.25rem;
+}
+
+.details-rich-text li {
+    margin: 0.28rem 0;
 }
 
 /* RESET BUTTON */
@@ -732,6 +915,23 @@ input[type="text"]:focus-visible {
     .right-panel-toggle-btn {
         flex: 1;
         text-align: center;
+    }
+
+    .details-title {
+        font-size: 24px;
+    }
+
+    .details-section,
+    .details-card {
+        padding: 16px;
+    }
+
+    .details-action-row {
+        flex-direction: column;
+    }
+
+    .details-action-btn {
+        width: 100%;
     }
 
     .app-footer {

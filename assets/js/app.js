@@ -306,11 +306,6 @@ function getPlainText(value) {
     return normalizeString(template.content.textContent || "");
 }
 
-function formatArrayForDisplay(values, formatter = null) {
-    const items = normalizeStringArray(values);
-    return items.map(item => formatter ? formatter(item) : item).join(", ");
-}
-
 function getResourceWebsites(resource) {
     if (Array.isArray(resource?.Websites)) {
         return normalizeWebsiteList(resource.Websites);
@@ -323,6 +318,51 @@ function getResourcePhoneNumbers(resource) {
         return normalizePhoneEntries(resource.PhoneNumbers);
     }
     return normalizePhoneEntries(resource?.Phone);
+}
+
+function getEmailHref(value) {
+    const email = normalizeString(value);
+    if (!email || /\s/.test(email) || !email.includes("@")) {
+        return "";
+    }
+    return `mailto:${email}`;
+}
+
+function formatResourceAddress(resource) {
+    const street = normalizeString(resource?.Address);
+    const city = normalizeString(resource?.City);
+    const zip = normalizeString(resource?.Zip);
+    const locality = [city, zip].filter(Boolean).join(" ");
+    return [street, locality].filter(Boolean).join("\n");
+}
+
+function getResourceMapHref(resource) {
+    const address = formatResourceAddress(resource);
+    if (!address) return "";
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address.replace(/\n+/g, ", "))}`;
+}
+
+function parseYyyyMmDd(value) {
+    const normalized = normalizeString(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+        return null;
+    }
+
+    const parsed = new Date(`${normalized}T12:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDisplayDate(value) {
+    const parsed = parseYyyyMmDd(value);
+    if (!parsed) {
+        return normalizeString(value);
+    }
+
+    return parsed.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric"
+    });
 }
 
 function getSafeHref(rawValue, allowBareDomain = false) {
@@ -734,46 +774,126 @@ function renderStatusCard(container, message) {
     container.appendChild(status);
 }
 
-function appendDetailField(label, value, options = {}) {
+async function copyTextToClipboard(value) {
+    const text = normalizeString(value);
+    if (!text) return false;
+
+    if (navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch {
+            // Fall through to the textarea fallback below.
+        }
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    let copied = false;
+    try {
+        copied = document.execCommand("copy");
+    } catch {
+        copied = false;
+    }
+
+    textarea.remove();
+    return copied;
+}
+
+function createDetailsSection(title, options = {}) {
+    const section = document.createElement("section");
+    section.className = `details-section${options.card ? " details-card" : ""}`;
+
+    if (title) {
+        const heading = document.createElement(options.headingTag || "h3");
+        heading.className = options.card ? "details-card-title" : "details-section-title";
+        heading.textContent = title;
+        section.appendChild(heading);
+    }
+
+    const body = document.createElement("div");
+    body.className = options.card ? "details-card-body" : "details-section-body";
+    section.appendChild(body);
+
+    return { section, body };
+}
+
+function createDetailsPriorityCard(title) {
+    return createDetailsSection(title, { card: true, headingTag: "h3" });
+}
+
+function appendDetailFieldTo(container, label, value, options = {}) {
+    if (!container) return false;
+
+    const {
+        richText = false,
+        link = false,
+        email = false,
+        preserveLineBreaks = false,
+        valueClassName = ""
+    } = options;
+
+    const normalizedValue = richText ? getPlainText(value) : normalizeString(value);
+    if (!normalizedValue) {
+        return false;
+    }
+
     const field = document.createElement("div");
     field.className = "details-field";
 
-    const labelEl = document.createElement("strong");
-    labelEl.textContent = `${label}:`;
+    const labelEl = document.createElement("div");
+    labelEl.className = "details-label";
+    labelEl.textContent = label;
     field.appendChild(labelEl);
-    field.appendChild(document.createTextNode(" "));
 
-    if (options.richText) {
-        const richTextWrap = document.createElement("span");
-        if (!appendSanitizedRichText(richTextWrap, value)) {
-            richTextWrap.textContent = "";
-        }
-        field.appendChild(richTextWrap);
-        rightPanelContent.appendChild(field);
-        return;
+    const valueWrap = document.createElement("div");
+    valueWrap.className = `details-value${valueClassName ? ` ${valueClassName}` : ""}`;
+    if (preserveLineBreaks) {
+        valueWrap.classList.add("details-value-pre");
     }
 
-    if (options.link) {
-        const href = getSafeHref(value, true);
+    if (richText) {
+        valueWrap.classList.add("details-rich-text");
+        if (!appendSanitizedRichText(valueWrap, value)) {
+            return false;
+        }
+        field.appendChild(valueWrap);
+        container.appendChild(field);
+        return true;
+    }
+
+    if (link || email) {
+        const href = email ? getEmailHref(value) : getSafeHref(value, true);
         if (href) {
-            const link = document.createElement("a");
-            link.href = href;
-            link.target = "_blank";
-            link.rel = "noopener noreferrer";
-            link.textContent = normalizeString(value);
-            field.appendChild(link);
+            const linkEl = document.createElement("a");
+            linkEl.href = href;
+            if (!href.startsWith("mailto:")) {
+                linkEl.target = "_blank";
+                linkEl.rel = "noopener noreferrer";
+            }
+            linkEl.textContent = normalizedValue;
+            valueWrap.appendChild(linkEl);
         } else {
-            field.appendChild(document.createTextNode(normalizeString(value)));
+            valueWrap.textContent = normalizedValue;
         }
-        rightPanelContent.appendChild(field);
-        return;
+    } else {
+        valueWrap.textContent = normalizedValue;
     }
 
-    field.appendChild(document.createTextNode(normalizeString(value)));
-    rightPanelContent.appendChild(field);
+    field.appendChild(valueWrap);
+    container.appendChild(field);
+    return true;
 }
 
-function appendDetailListField(label, values, options = {}) {
+function appendDetailListFieldTo(container, label, values, options = {}) {
+    if (!container) return false;
+
     const items = Array.isArray(values)
         ? values.filter(item => {
             if (options.displayFormatter) {
@@ -782,22 +902,21 @@ function appendDetailListField(label, values, options = {}) {
             return normalizeString(item);
         })
         : [];
+
     if (!items.length) {
-        appendDetailField(label, "");
-        return;
+        return false;
     }
 
     const field = document.createElement("div");
     field.className = "details-field";
 
-    const labelEl = document.createElement("strong");
-    labelEl.textContent = `${label}:`;
+    const labelEl = document.createElement("div");
+    labelEl.className = "details-label";
+    labelEl.textContent = label;
     field.appendChild(labelEl);
-    field.appendChild(document.createTextNode(" "));
 
     const list = document.createElement("ul");
-    list.style.margin = "6px 0 0 18px";
-    list.style.padding = "0";
+    list.className = `details-list${options.plain ? " details-list-plain" : ""}`;
 
     items.forEach(item => {
         const entry = document.createElement("li");
@@ -808,22 +927,22 @@ function appendDetailListField(label, values, options = {}) {
         if (options.link) {
             const href = getSafeHref(String(item ?? ""), true);
             if (href) {
-                const link = document.createElement("a");
-                link.href = href;
-                link.target = "_blank";
-                link.rel = "noopener noreferrer";
-                link.textContent = displayText;
-                entry.appendChild(link);
+                const linkEl = document.createElement("a");
+                linkEl.href = href;
+                linkEl.target = "_blank";
+                linkEl.rel = "noopener noreferrer";
+                linkEl.textContent = displayText;
+                entry.appendChild(linkEl);
             } else {
                 entry.textContent = displayText;
             }
         } else if (options.tel) {
             const href = getPhoneHref(item);
             if (href) {
-                const link = document.createElement("a");
-                link.href = href;
-                link.textContent = displayText;
-                entry.appendChild(link);
+                const linkEl = document.createElement("a");
+                linkEl.href = href;
+                linkEl.textContent = displayText;
+                entry.appendChild(linkEl);
             } else {
                 entry.textContent = displayText;
             }
@@ -835,7 +954,85 @@ function appendDetailListField(label, values, options = {}) {
     });
 
     field.appendChild(list);
-    rightPanelContent.appendChild(field);
+    container.appendChild(field);
+    return true;
+}
+
+function appendRichTextBlockTo(container, value) {
+    if (!container || !getPlainText(value)) {
+        return false;
+    }
+
+    const block = document.createElement("div");
+    block.className = "details-rich-text";
+    if (!appendSanitizedRichText(block, value)) {
+        return false;
+    }
+
+    container.appendChild(block);
+    return true;
+}
+
+function appendChipGroupTo(container, label, values, formatter = null) {
+    if (!container) return false;
+
+    const items = normalizeStringArray(values)
+        .map(item => formatter ? formatter(item) : item)
+        .filter(Boolean);
+
+    if (!items.length) {
+        return false;
+    }
+
+    const group = document.createElement("div");
+    group.className = "details-chip-group";
+
+    const labelEl = document.createElement("div");
+    labelEl.className = "details-chip-label";
+    labelEl.textContent = label;
+    group.appendChild(labelEl);
+
+    const list = document.createElement("div");
+    list.className = "details-chip-list";
+
+    items.forEach(item => {
+        const chip = document.createElement("span");
+        chip.className = "details-chip";
+        chip.textContent = item;
+        list.appendChild(chip);
+    });
+
+    group.appendChild(list);
+    container.appendChild(group);
+    return true;
+}
+
+function createDetailActionLink(label, href) {
+    const link = document.createElement("a");
+    link.className = "details-action-btn";
+    link.href = href;
+    if (href.startsWith("http://") || href.startsWith("https://")) {
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+    }
+    link.textContent = label;
+    return link;
+}
+
+function createCopyAddressButton(address) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "details-action-btn details-action-btn-secondary";
+    button.textContent = "Copy address";
+    button.addEventListener("click", async () => {
+        const copied = await copyTextToClipboard(address);
+        const originalText = button.textContent;
+        button.textContent = copied ? "Address copied" : "Copy failed";
+        window.setTimeout(() => {
+            button.textContent = originalText;
+        }, 1800);
+    });
+    return button;
 }
 
 function sortByOrganizationInPlace(list) {
@@ -920,27 +1117,84 @@ function showDetails(resource, options = {}) {
 
     renderDetailsShell();
     destroyLeafletMap();
-    rightPanelContent.appendChild(
+    const titleBlock = document.createElement("div");
+    titleBlock.className = "details-title-block";
+    titleBlock.appendChild(
         createTextBlock("div", "details-title", normalizeString(resource.Organization) || "No name")
     );
+    appendChipGroupTo(titleBlock, "Categories", resource.Categories);
+    rightPanelContent.appendChild(titleBlock);
 
     const phones = getResourcePhoneNumbers(resource);
     const websites = getResourceWebsites(resource);
+    const address = formatResourceAddress(resource);
+    const mapHref = getResourceMapHref(resource);
 
-    appendDetailField("Description", resource.Description, { richText: true });
-    appendDetailField("Address", resource.Address);
-    appendDetailField("City", resource.City);
-    appendDetailField("Zip", resource.Zip);
-    appendDetailListField("Phone", phones, { tel: true, displayFormatter: getPhoneDisplayText });
-    appendDetailField("Email", resource.Email);
-    appendDetailListField("Website", websites, { link: true, displayFormatter: getWebsiteDisplayText });
-    appendDetailField("Categories", formatArrayForDisplay(resource.Categories));
-    appendDetailField("Subcategories", formatArrayForDisplay(resource.Subcategories, formatSubcategoryLabel));
-    appendDetailField("Eligibility", resource.Eligibility);
-    appendDetailField("Hours", resource.Hours);
-    appendDetailField("Cost", resource.Cost);
-    appendDetailField("Last Verified", resource["Last Verified"]);
-    appendDetailField("Notes", resource.Notes, { richText: true });
+    const priorityGrid = document.createElement("div");
+    priorityGrid.className = "details-priority-grid";
+
+    const contactCard = createDetailsPriorityCard("Contact");
+    const hasContactContent = [
+        appendDetailListFieldTo(contactCard.body, "Phone", phones, {
+            tel: true,
+            plain: true,
+            displayFormatter: getPhoneDisplayText
+        }),
+        appendDetailFieldTo(contactCard.body, "Email", resource.Email, { email: true }),
+        appendDetailListFieldTo(contactCard.body, "Website", websites, {
+            link: true,
+            plain: true,
+            displayFormatter: getWebsiteDisplayText
+        })
+    ].some(Boolean);
+    if (hasContactContent) {
+        priorityGrid.appendChild(contactCard.section);
+    }
+
+    const locationCard = createDetailsPriorityCard("Location");
+    const hasLocation = appendDetailFieldTo(locationCard.body, "Address", address, {
+        preserveLineBreaks: true,
+        valueClassName: "details-address"
+    });
+    if (hasLocation) {
+        const actionRow = document.createElement("div");
+        actionRow.className = "details-action-row";
+        if (mapHref) {
+            actionRow.appendChild(createDetailActionLink("Open in map", mapHref));
+        }
+        actionRow.appendChild(createCopyAddressButton(address));
+        locationCard.body.appendChild(actionRow);
+        priorityGrid.appendChild(locationCard.section);
+    }
+
+    const factsCard = createDetailsPriorityCard("Quick Facts");
+    const hasFacts = [
+        appendDetailFieldTo(factsCard.body, "Eligibility", resource.Eligibility),
+        appendDetailFieldTo(factsCard.body, "Hours", resource.Hours),
+        appendDetailFieldTo(factsCard.body, "Cost", resource.Cost),
+        appendDetailFieldTo(factsCard.body, "Last Verified", formatDisplayDate(resource["Last Verified"]))
+    ].some(Boolean);
+    if (hasFacts) {
+        priorityGrid.appendChild(factsCard.section);
+    }
+
+    if (priorityGrid.childElementCount > 0) {
+        rightPanelContent.appendChild(priorityGrid);
+    }
+
+    const overviewSection = createDetailsSection("Overview");
+    if (appendRichTextBlockTo(overviewSection.body, resource.Description)) {
+        rightPanelContent.appendChild(overviewSection.section);
+    }
+
+    const detailsSection = createDetailsSection("Program Details");
+    const hasProgramDetails = [
+        appendChipGroupTo(detailsSection.body, "Subcategories", resource.Subcategories, formatSubcategoryLabel),
+        appendRichTextBlockTo(detailsSection.body, resource.Notes)
+    ].some(Boolean);
+    if (hasProgramDetails) {
+        rightPanelContent.appendChild(detailsSection.section);
+    }
 
     if (updateHistory) {
         updateUrlState();
