@@ -768,6 +768,7 @@ body {
 .editor-actions {
   display: flex;
   gap: 10px;
+  align-items: center;
   flex-wrap: wrap;
   margin-top: 18px;
 }
@@ -779,6 +780,21 @@ body {
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
+}
+
+.editor-inline-status {
+  font-size: 13px;
+  font-weight: 600;
+  color: #166534;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+}
+
+.editor-inline-status.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .field-list-group {

@@ -66,6 +66,7 @@ const resourceList = document.getElementById("resource-list");
 const resourceEditor = document.getElementById("resource-editor");
 const editorTitle = document.getElementById("editor-title");
 const resourceForm = document.getElementById("resource-form");
+const resourceSaveStatus = document.getElementById("resource-save-status");
 
 const addResourceBtn = document.getElementById("add-resource-btn");
 const saveResourceBtn = document.getElementById("save-resource-btn");
@@ -236,6 +237,7 @@ let reviewConfirmationMeta = [];
 let reviewStatusMeta = [];
 let activeReviewFilter = "due";
 let activeReviewOrganizationFilter = "";
+let resourceSaveStatusTimer = null;
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -305,6 +307,30 @@ function show(el) {
 
 function hide(el) {
   el?.classList.add("hidden");
+}
+
+function clearResourceSaveStatus() {
+  if (resourceSaveStatusTimer) {
+    window.clearTimeout(resourceSaveStatusTimer);
+    resourceSaveStatusTimer = null;
+  }
+
+  if (!resourceSaveStatus) return;
+  resourceSaveStatus.textContent = "";
+  resourceSaveStatus.classList.remove("visible");
+}
+
+function showResourceSaveStatus(message = "Resource saved") {
+  if (!resourceSaveStatus) return;
+
+  clearResourceSaveStatus();
+  resourceSaveStatus.textContent = message;
+  resourceSaveStatus.classList.add("visible");
+  resourceSaveStatusTimer = window.setTimeout(() => {
+    resourceSaveStatus.classList.remove("visible");
+    resourceSaveStatus.textContent = "";
+    resourceSaveStatusTimer = null;
+  }, 10000);
 }
 
 function clearChildren(el) {
@@ -1744,6 +1770,7 @@ function renderResourceList(resources) {
 }
 
 function openResourceEditor(docId, data) {
+  clearResourceSaveStatus();
   editingResourceId = docId;
   editingResourceData = data ? { ...data } : {};
   editorTitle.textContent = "Edit Resource";
@@ -1752,6 +1779,7 @@ function openResourceEditor(docId, data) {
 }
 
 addResourceBtn?.addEventListener("click", () => {
+  clearResourceSaveStatus();
   editingResourceId = null;
   editingResourceData = {};
   editorTitle.textContent = "Add New Resource";
@@ -1760,6 +1788,7 @@ addResourceBtn?.addEventListener("click", () => {
 });
 
 cancelResourceBtn?.addEventListener("click", () => {
+  clearResourceSaveStatus();
   hide(resourceEditor);
   editingResourceData = null;
 });
@@ -2446,6 +2475,7 @@ saveResourceBtn?.addEventListener("click", async () => {
       preserveEditorId: savedResourceId,
       preserveScrollTop
     });
+    showResourceSaveStatus(isNew ? "Resource created" : "Resource saved");
     await loadReviewStatus({ preserveEditor: true });
     await loadAuditLogs();
   } catch (err) {
