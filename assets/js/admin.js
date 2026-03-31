@@ -2573,11 +2573,18 @@ deleteResourceBtn?.addEventListener("click", async () => {
 // ------------------------------------------------------
 // ORGANIZATIONS (CRUD)
 // ------------------------------------------------------
-async function loadOrganizations() {
+async function loadOrganizations(options = {}) {
   if (!organizationList) return;
 
-  hide(organizationEditor);
-  editingOrganizationId = null;
+  const {
+    preserveEditorId = null,
+    preserveScrollTop = null
+  } = options;
+
+  if (!preserveEditorId) {
+    hide(organizationEditor);
+    editingOrganizationId = null;
+  }
   organizationList.textContent = "Loading...";
   organizationMeta = [];
 
@@ -2604,6 +2611,21 @@ async function loadOrganizations() {
     organizationMeta = organizations;
     populateReviewOrganizationFilter();
     renderOrganizationList(organizations);
+
+    if (preserveEditorId) {
+      const refreshedOrganization = organizations.find(item => item.id === preserveEditorId);
+      if (refreshedOrganization) {
+        openOrganizationEditor(refreshedOrganization);
+      } else {
+        hide(organizationEditor);
+        editingOrganizationId = null;
+      }
+    }
+
+    if (typeof preserveScrollTop === "number" && organizationList) {
+      organizationList.scrollTop = preserveScrollTop;
+    }
+
     refreshOrganizationMembershipSection();
   } catch (err) {
     console.error("Error loading organizations:", err);
@@ -2620,7 +2642,9 @@ function renderOrganizationList(orgs) {
   }
 
   orgs.forEach(org => {
-    const row = createEl("div", { className: "list-row list-row-stacked" });
+    const row = createEl("div", {
+      className: `list-row list-row-stacked${org.id === editingOrganizationId ? " selected" : ""}`
+    });
     row.appendChild(createEl("div", { className: "list-row-title", text: getOrganizationDisplayName(org) }));
     row.appendChild(createEl("div", { className: "list-row-meta", text: getOrganizationSummary(org) }));
     row.addEventListener("click", () => openOrganizationEditor(org));
@@ -2701,6 +2725,9 @@ saveOrganizationBtn?.addEventListener("click", async () => {
   payload.updatedByEmail = actor.email;
 
   try {
+    const preserveScrollTop = organizationList?.scrollTop ?? 0;
+    let savedOrganizationId = editingOrganizationId;
+
     if (editingOrganizationId) {
       const previousOrg = organizationMeta.find(org => org.id === editingOrganizationId) || {};
       await updateDoc(doc(db, "organizations", editingOrganizationId), payload);
@@ -2721,6 +2748,7 @@ saveOrganizationBtn?.addEventListener("click", async () => {
       payload.createdBy = actor.uid;
       payload.createdByEmail = actor.email;
       const createdRef = await addDoc(collection(db, "organizations"), payload);
+      savedOrganizationId = createdRef.id;
       await logAuditEvent({
         area: "access",
         action: "organization.created",
@@ -2736,8 +2764,10 @@ saveOrganizationBtn?.addEventListener("click", async () => {
       });
     }
 
-    hide(organizationEditor);
-    await loadOrganizations();
+    await loadOrganizations({
+      preserveEditorId: savedOrganizationId,
+      preserveScrollTop
+    });
     await loadResources();
     await loadMemberships();
     await loadInvites();
