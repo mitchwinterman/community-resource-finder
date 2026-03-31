@@ -1656,10 +1656,17 @@ function getResourceDisplayName(resource) {
   return normalizeString(resource?.Organization) || "(Unnamed)";
 }
 
-async function loadResources() {
-  hide(resourceEditor);
-  editingResourceId = null;
-  editingResourceData = null;
+async function loadResources(options = {}) {
+  const {
+    preserveEditorId = null,
+    preserveScrollTop = null
+  } = options;
+
+  if (!preserveEditorId) {
+    hide(resourceEditor);
+    editingResourceId = null;
+    editingResourceData = null;
+  }
 
   resourceList.textContent = "Loading...";
 
@@ -1676,6 +1683,21 @@ async function loadResources() {
 
     resourceMeta = resources;
     renderResourceList(resources);
+
+    if (preserveEditorId) {
+      const refreshedResource = resources.find(item => item.id === preserveEditorId);
+      if (refreshedResource) {
+        openResourceEditor(refreshedResource.id, refreshedResource);
+      } else {
+        hide(resourceEditor);
+        editingResourceId = null;
+        editingResourceData = null;
+      }
+    }
+
+    if (typeof preserveScrollTop === "number" && resourceList) {
+      resourceList.scrollTop = preserveScrollTop;
+    }
   } catch (err) {
     console.error("Error loading resources:", err);
     resourceList.textContent = "Error loading resources.";
@@ -1691,7 +1713,10 @@ function renderResourceList(resources) {
   }
 
   resources.forEach(r => {
-    const row = createEl("div", { className: "list-row list-row-stacked" });
+    const row = createEl("div", {
+      className: `list-row list-row-stacked${r.id === editingResourceId ? " selected" : ""}`,
+      attrs: { "data-resource-id": r.id }
+    });
     row.appendChild(createEl("div", { className: "list-row-title", text: getResourceDisplayName(r) }));
 
     const orgName = getOrganizationNameById(r.organizationId);
@@ -2380,6 +2405,9 @@ saveResourceBtn?.addEventListener("click", async () => {
   }
 
   try {
+    const preserveScrollTop = resourceList?.scrollTop ?? 0;
+    let savedResourceId = editingResourceId;
+
     if (editingResourceId) {
       const previousData = editingResourceData ? { ...editingResourceData } : {};
       await updateDoc(doc(db, "resources", editingResourceId), payload);
@@ -2398,6 +2426,7 @@ saveResourceBtn?.addEventListener("click", async () => {
       });
     } else {
       const createdRef = await addDoc(collection(db, "resources"), payload);
+      savedResourceId = createdRef.id;
       await logAuditEvent({
         area: "directory",
         action: "resource.created",
@@ -2413,8 +2442,10 @@ saveResourceBtn?.addEventListener("click", async () => {
         }
       });
     }
-    hide(resourceEditor);
-    await loadResources();
+    await loadResources({
+      preserveEditorId: savedResourceId,
+      preserveScrollTop
+    });
     await loadReviewStatus({ preserveEditor: true });
     await loadAuditLogs();
   } catch (err) {
