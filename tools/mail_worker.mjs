@@ -11,7 +11,7 @@ import {
   normalizePhoneEntries,
   getPhoneDisplayText,
   getWebsiteDisplayText
-} from "../contact-fields.js";
+} from "../assets/js/contact-fields.js";
 
 const DEFAULT_LIMIT = 25;
 const SENT_RETENTION_DAYS = 183;
