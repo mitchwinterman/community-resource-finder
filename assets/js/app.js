@@ -167,6 +167,7 @@ const allowedRichTextTags = new Set([
     "A",
     "B",
     "BR",
+    "DIV",
     "EM",
     "I",
     "LI",
@@ -178,7 +179,9 @@ const allowedRichTextTags = new Set([
 ]);
 
 function normalizeString(value) {
-    return String(value ?? "").trim();
+    return String(value ?? "")
+        .replace(/[\u00A0\u202F]/g, " ")
+        .trim();
 }
 
 function normalizeStringArray(value) {
@@ -396,7 +399,7 @@ function sanitizeHtmlToFragment(html) {
 
     function sanitizeNode(node) {
         if (node.nodeType === Node.TEXT_NODE) {
-            return document.createTextNode(node.textContent || "");
+            return document.createTextNode((node.textContent || "").replace(/[\u00A0\u202F]/g, " "));
         }
 
         if (node.nodeType !== Node.ELEMENT_NODE) {

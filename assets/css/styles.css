@@ -269,11 +269,13 @@ select:focus {
 .content-split {
     display: flex;
     gap: 20px;
+    min-width: 0;
 }
 
 /* Left list panel */
 .results-panel {
     width: 42%;
+    min-width: 0;
     max-height: 70vh;
     overflow-y: auto;
     padding-right: 10px;
@@ -282,6 +284,7 @@ select:focus {
 /* Right details panel */
 .details-panel {
     flex: 1;
+    min-width: 0;
     min-height: 70vh;
     background: radial-gradient(circle at top left, #f0f5ff 0, #f8fafc 60%);
     border-radius: 16px;
@@ -422,6 +425,7 @@ select:focus {
     display: block;
     width: 100%;
     text-align: left;
+    white-space: normal;
     padding: 14px 16px;
     border-radius: 12px;
     margin-bottom: 10px;
@@ -464,6 +468,10 @@ input[type="text"]:focus-visible {
 .card-description {
     font-size: 13px;
     color: #6b7280;
+    line-height: 1.5;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
 }
 
 /* Details */
@@ -486,6 +494,7 @@ input[type="text"]:focus-visible {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 14px;
+    min-width: 0;
 }
 
 .details-section,
@@ -494,6 +503,7 @@ input[type="text"]:focus-visible {
     border-radius: 16px;
     background: rgba(255, 255, 255, 0.82);
     box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+    min-width: 0;
 }
 
 .details-card {
@@ -514,6 +524,7 @@ input[type="text"]:focus-visible {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    min-width: 0;
 }
 
 .details-field {
@@ -539,7 +550,9 @@ input[type="text"]:focus-visible {
     line-height: 1.6;
     color: #0f172a;
     min-width: 0;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
 }
 
 .details-value-pre {
@@ -640,13 +653,31 @@ input[type="text"]:focus-visible {
     font-size: 14px;
     line-height: 1.65;
     color: #1f2937;
+    min-width: 0;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
 }
 
 .details-rich-text p {
     margin: 0 0 0.8rem;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
+}
+
+.details-rich-text div {
+    margin: 0 0 0.8rem;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
 }
 
 .details-rich-text p:last-child {
+    margin-bottom: 0;
+}
+
+.details-rich-text div:last-child {
     margin-bottom: 0;
 }
 
@@ -658,6 +689,9 @@ input[type="text"]:focus-visible {
 
 .details-rich-text li {
     margin: 0.28rem 0;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
 }
 
 /* RESET BUTTON */
