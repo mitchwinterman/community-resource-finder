@@ -489,7 +489,7 @@ function updateRightPanelToggleUi() {
         if (!selectedScope) {
             detailsHeading.textContent = "All Results Map";
         } else {
-            detailsHeading.textContent = isDetails ? "Resource Details" : "Resource Map";
+            detailsHeading.textContent = isDetails ? "Resource Details" : "Selected Resource Map";
         }
     }
 }
@@ -579,36 +579,6 @@ function renderMapView() {
 
     const panel = document.createElement("div");
     panel.className = "map-view-panel";
-
-    const summary = document.createElement("div");
-    summary.className = "map-view-summary";
-    summary.appendChild(createTextBlock(
-        "div",
-        "map-view-title",
-        isResultsScope ? "All Results Map" : "Selected Resource Map"
-    ));
-
-    if (isResultsScope) {
-        const stats = document.createElement("div");
-        stats.className = "map-view-stats";
-        stats.appendChild(createTextBlock("div", "map-view-stat", `${currentResultSet.length} current result${currentResultSet.length === 1 ? "" : "s"}`));
-        stats.appendChild(createTextBlock("div", "map-view-stat", `${mappableResources.length} currently mappable`));
-        summary.appendChild(stats);
-        summary.appendChild(createTextBlock(
-            "div",
-            "map-view-note",
-            "This mode maps all currently filtered and included results."
-        ));
-    } else {
-        summary.appendChild(createTextBlock(
-            "div",
-            "map-view-note",
-            selectedResource
-                ? `Showing: ${normalizeString(selectedResource.Organization) || "No name"}`
-                : "Select a result on the left to view that resource on the map."
-        ));
-    }
-    panel.appendChild(summary);
 
     if (isResultsScope && !mappableResources.length) {
         rightPanelContent.appendChild(panel);
