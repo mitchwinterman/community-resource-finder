@@ -15,6 +15,7 @@ const passwordInput = document.getElementById("password");
 const loginBtn = document.getElementById("loginBtn");
 const forgotPasswordBtn = document.getElementById("forgotPasswordBtn");
 const loginError = document.getElementById("login-error");
+const hostedLoginUrl = "https://mitchwinterman.github.io/community-resource-finder/login.html";
 
 let authStatusMessage = "";
 
@@ -29,6 +30,10 @@ function showLoginMessage(message, type = "error") {
 }
 
 function getLoginReturnUrl() {
+  const hostname = normalizeString(window.location.hostname).toLowerCase();
+  if (hostname === "127.0.0.1" || hostname === "localhost") {
+    return hostedLoginUrl;
+  }
   return new URL("login.html", window.location.href).href;
 }
 
@@ -84,6 +89,14 @@ forgotPasswordBtn?.addEventListener("click", async () => {
     console.error("Password reset error:", err);
     if (err?.code === "auth/invalid-email") {
       showLoginMessage("Please enter a valid email address.");
+      return;
+    }
+    if (err?.code === "auth/missing-continue-uri") {
+      showLoginMessage("Password reset is not configured correctly yet. Please contact library staff.");
+      return;
+    }
+    if (err?.code === "auth/invalid-continue-uri" || err?.code === "auth/unauthorized-continue-uri") {
+      showLoginMessage("Password reset is blocked by Firebase domain settings. Please contact library staff.");
       return;
     }
     if (err?.code === "auth/too-many-requests") {
