@@ -32,6 +32,36 @@
             color: #1e3a8a;
             font-size: 14px;
         }
+
+        .organization-summary {
+            display: grid;
+            gap: 10px;
+        }
+
+        .organization-summary-row {
+            display: grid;
+            grid-template-columns: 160px 1fr;
+            gap: 12px;
+            align-items: start;
+            font-size: 14px;
+        }
+
+        .organization-summary-row strong {
+            color: #102a43;
+        }
+
+        .organization-summary-row span,
+        .organization-summary-row a {
+            color: #334155;
+            word-break: break-word;
+        }
+
+        .request-history-actions {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
     </style>
 </head>
 <body>
@@ -67,6 +97,24 @@
 
         <div class="panel">
             <div class="panel-header">
+                <h3>Your Organization</h3>
+                <button id="edit-organization-btn" type="button">Edit Organization Details</button>
+            </div>
+
+            <div id="organization-summary" class="organization-summary"></div>
+
+            <div id="organization-editor" class="editor hidden">
+                <h3>Update Organization Details</h3>
+                <div id="organization-form"></div>
+                <div class="editor-actions">
+                    <button id="save-organization-btn" type="button">Save Organization Details</button>
+                    <button id="cancel-organization-btn" type="button">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
                 <h3>Your Resources</h3>
                 <button id="add-resource-btn" type="button">+ Add Resource</button>
             </div>
@@ -87,6 +135,7 @@
                         <div class="editor-actions">
                             <button id="submit-request-btn" type="button">Submit for Review</button>
                             <button id="cancel-resource-btn" type="button">Cancel</button>
+                            <button id="delete-resource-request-btn" type="button" class="danger-btn hidden">DELETE</button>
                         </div>
                     </div>
                 </div>

@@ -42,7 +42,10 @@ service cloud.firestore {
 
     match /organizations/{organizationId} {
       allow read: if isAdmin() || belongsToOrganization(organizationId);
-      allow create, update, delete: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (belongsToOrganization(organizationId)
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(["primaryEmail", "phone", "website", "updatedAt", "updatedBy", "updatedByEmail"]));
     }
 
     match /organization_members/{userId} {
@@ -74,7 +77,21 @@ service cloud.firestore {
         && request.resource.data.organizationId == memberOrganizationId()
         && request.resource.data.submittedByUid == request.auth.uid
         && request.resource.data.status == "pending";
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (hasActiveMembership()
+          && resource.data.organizationId == memberOrganizationId()
+          && resource.data.status == "pending"
+          && request.resource.data.organizationId == resource.data.organizationId
+          && request.resource.data.submittedByUid == resource.data.submittedByUid
+          && request.resource.data.submittedByEmail == resource.data.submittedByEmail
+          && request.resource.data.requestType == resource.data.requestType
+          && (
+            (request.resource.data.status == "pending"
+              && request.resource.data.diff(resource.data).changedKeys().hasOnly(["resourceName", "proposedData", "submitterNotes", "updatedAt"]))
+            || (request.resource.data.status == "cancelled"
+              && request.resource.data.diff(resource.data).changedKeys().hasOnly(["status", "cancelledAt", "updatedAt"]))
+          ));
+      allow delete: if isAdmin();
     }
 
     match /review_confirmations/{token} {

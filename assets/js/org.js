@@ -15,6 +15,7 @@ import {
   onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
+  getWebsiteDisplayText,
   getResourceTitle,
   normalizeWebsiteList,
   normalizePhoneEntries
@@ -33,6 +34,12 @@ const loginBtn = document.getElementById("loginBtn");
 const loginError = document.getElementById("login-error");
 const logoutBtn = document.getElementById("logoutBtn");
 const orgStatusBanner = document.getElementById("org-status-banner");
+const organizationSummary = document.getElementById("organization-summary");
+const organizationEditor = document.getElementById("organization-editor");
+const organizationForm = document.getElementById("organization-form");
+const editOrganizationBtn = document.getElementById("edit-organization-btn");
+const saveOrganizationBtn = document.getElementById("save-organization-btn");
+const cancelOrganizationBtn = document.getElementById("cancel-organization-btn");
 
 const resourceList = document.getElementById("resource-list");
 const resourceEditor = document.getElementById("resource-editor");
@@ -41,6 +48,7 @@ const resourceForm = document.getElementById("resource-form");
 const submitterNotesInput = document.getElementById("submitter-notes");
 const submitRequestBtn = document.getElementById("submit-request-btn");
 const cancelResourceBtn = document.getElementById("cancel-resource-btn");
+const deleteResourceRequestBtn = document.getElementById("delete-resource-request-btn");
 const requestList = document.getElementById("request-list");
 const addResourceBtn = document.getElementById("add-resource-btn");
 
@@ -51,6 +59,7 @@ let resourceMeta = [];
 let requestMeta = [];
 let editingResource = null;
 let editingResourceMode = "edit";
+let editingPendingRequest = null;
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -127,13 +136,14 @@ function normalizeMapIncludeValue(value, defaultValue = true) {
 
 function normalizeRequestStatus(value) {
   const status = normalizeString(value).toLowerCase();
-  if (status === "approved" || status === "rejected") return status;
+  if (status === "approved" || status === "rejected" || status === "cancelled") return status;
   return "pending";
 }
 
 function normalizeRequestType(value) {
   const requestType = normalizeString(value).toLowerCase();
   if (requestType === "resource_create") return "resource_create";
+  if (requestType === "resource_delete") return "resource_delete";
   if (requestType === "quarterly_confirmation") return "quarterly_confirmation";
   return "resource_edit";
 }
@@ -141,6 +151,7 @@ function normalizeRequestType(value) {
 function getRequestTypeLabel(value) {
   const requestType = normalizeRequestType(value);
   if (requestType === "resource_create") return "New resource";
+  if (requestType === "resource_delete") return "Delete resource";
   if (requestType === "quarterly_confirmation") return "Quarterly confirmation";
   return "Resource update";
 }
@@ -345,12 +356,43 @@ async function loadOrganizationForMembership(membership) {
   const organizationId = normalizeString(membership?.organizationId);
   if (!organizationId) {
     organizationDoc = null;
+    renderOrganizationSummary();
     return null;
   }
 
   const organizationSnap = await getDoc(doc(db, "organizations", organizationId));
   organizationDoc = organizationSnap.exists() ? { id: organizationSnap.id, ...organizationSnap.data() } : null;
+  renderOrganizationSummary();
   return organizationDoc;
+}
+
+function renderOrganizationSummary() {
+  clearChildren(organizationSummary);
+  if (!organizationSummary) return;
+
+  const summaryRows = [
+    ["Organization", normalizeString(organizationDoc?.name) || "(Unnamed organization)"],
+    ["Primary Email", normalizeString(organizationDoc?.primaryEmail) || "(Not set)"],
+    ["Phone", normalizeString(organizationDoc?.phone) || "(Not set)"],
+    ["Website", normalizeString(organizationDoc?.website) || ""]
+  ];
+
+  summaryRows.forEach(([label, value]) => {
+    const row = createEl("div", { className: "organization-summary-row" });
+    row.appendChild(createEl("strong", { text: label }));
+
+    if (label === "Website" && value) {
+      const href = normalizeWebsiteList(value)[0] || value;
+      row.appendChild(createEl("a", {
+        text: getWebsiteDisplayText(href) || href,
+        attrs: { href, target: "_blank", rel: "noopener noreferrer" }
+      }));
+    } else {
+      row.appendChild(createEl("span", { text: value || "(Not set)" }));
+    }
+
+    organizationSummary.appendChild(row);
+  });
 }
 
 async function loadCategories() {
@@ -464,13 +506,100 @@ function renderResourceList(resources) {
   });
 }
 
+async function cancelPendingRequest(requestDoc) {
+  const requestName = normalizeString(requestDoc?.resourceName) || "this request";
+  const confirmed = window.confirm(
+    `Cancel the pending request for "${requestName}"?\n\nThis will remove it from library review.`
+  );
+  if (!confirmed) return;
+
+  await updateDoc(doc(db, "resource_change_requests", requestDoc.id), {
+    status: "cancelled",
+    cancelledAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  await logOrgAuditEvent({
+    action: "request.cancelled",
+    entityType: "request",
+    entityId: requestDoc.id,
+    entityLabel: normalizeString(requestDoc.resourceName),
+    organizationId: normalizeString(membershipDoc?.organizationId),
+    relatedResourceId: normalizeString(requestDoc.resourceId),
+    relatedRequestId: requestDoc.id,
+    summary: `Cancelled pending request for ${normalizeString(requestDoc.resourceName) || requestDoc.id}`,
+    details: {
+      requestType: normalizeRequestType(requestDoc.requestType)
+    }
+  });
+
+  await loadRequests();
+  await loadOwnedResources();
+}
+
+function openPendingRequestEditor(requestDoc) {
+  const requestType = normalizeRequestType(requestDoc?.requestType);
+  if (!["resource_create", "resource_edit"].includes(requestType)) {
+    return;
+  }
+
+  const baseResource = requestType === "resource_create"
+    ? createNewResourceDraft()
+    : resourceMeta.find(resource => resource.id === normalizeString(requestDoc.resourceId)) || { id: normalizeString(requestDoc.resourceId) };
+
+  editingPendingRequest = requestDoc;
+  editingResourceMode = requestType === "resource_create" ? "create" : "edit";
+  editingResource = {
+    ...baseResource,
+    ...(requestDoc?.proposedData || {})
+  };
+
+  if (requestType === "resource_edit") {
+    editingResource.id = normalizeString(requestDoc.resourceId) || normalizeString(baseResource.id);
+  }
+
+  buildResourceForm(editingResource);
+  submitterNotesInput.value = normalizeString(requestDoc.submitterNotes);
+  show(resourceEditor);
+}
+
+async function editPendingDeleteRequest(requestDoc) {
+  const nextNotes = window.prompt(
+    "Update notes for library staff:",
+    normalizeString(requestDoc?.submitterNotes)
+  );
+  if (nextNotes == null) return;
+
+  await updateDoc(doc(db, "resource_change_requests", requestDoc.id), {
+    submitterNotes: normalizeString(nextNotes),
+    updatedAt: serverTimestamp()
+  });
+
+  await logOrgAuditEvent({
+    action: "request.updated",
+    entityType: "request",
+    entityId: requestDoc.id,
+    entityLabel: normalizeString(requestDoc.resourceName),
+    organizationId: normalizeString(membershipDoc?.organizationId),
+    relatedResourceId: normalizeString(requestDoc.resourceId),
+    relatedRequestId: requestDoc.id,
+    summary: `Updated pending delete request for ${normalizeString(requestDoc.resourceName) || requestDoc.id}`,
+    details: {
+      requestType: normalizeRequestType(requestDoc.requestType)
+    }
+  });
+
+  await loadRequests();
+}
+
 function renderRequestList(requests) {
   clearChildren(requestList);
 
   const sections = [
     { status: "pending", label: "Pending" },
     { status: "approved", label: "Approved" },
-    { status: "rejected", label: "Rejected" }
+    { status: "rejected", label: "Rejected" },
+    { status: "cancelled", label: "Cancelled" }
   ];
 
   sections.forEach(section => {
@@ -511,6 +640,44 @@ function renderRequestList(requests) {
         }));
       }
 
+      if (section.status === "pending") {
+        const actions = createEl("div", { className: "request-history-actions" });
+
+        const editBtn = createEl("button", { text: "Edit Request", attrs: { type: "button" } });
+        editBtn.addEventListener("click", async event => {
+          event.stopPropagation();
+          try {
+            if (normalizeRequestType(requestDoc.requestType) === "resource_delete") {
+              await editPendingDeleteRequest(requestDoc);
+            } else {
+              openPendingRequestEditor(requestDoc);
+            }
+          } catch (err) {
+            console.error("Error editing pending request:", err);
+            alert("Error loading the pending request. See console for details.");
+          }
+        });
+
+        const cancelBtn = createEl("button", {
+          text: "Cancel Request",
+          className: "danger-btn",
+          attrs: { type: "button" }
+        });
+        cancelBtn.addEventListener("click", async event => {
+          event.stopPropagation();
+          try {
+            await cancelPendingRequest(requestDoc);
+          } catch (err) {
+            console.error("Error cancelling pending request:", err);
+            alert("Error cancelling the pending request. See console for details.");
+          }
+        });
+
+        actions.appendChild(editBtn);
+        actions.appendChild(cancelBtn);
+        row.appendChild(actions);
+      }
+
       sectionWrap.appendChild(row);
     });
 
@@ -530,6 +697,34 @@ function buildFieldText(fieldKey, label, value = "", required = false) {
   wrap.appendChild(lbl);
   wrap.appendChild(input);
   return wrap;
+}
+
+function buildOrganizationForm(organization) {
+  clearChildren(organizationForm);
+  organizationForm.appendChild(buildFieldText("primaryEmail", "Primary Email", organization?.primaryEmail || "", false));
+  organizationForm.appendChild(buildFieldText("phone", "Phone", organization?.phone || "", false));
+  organizationForm.appendChild(buildFieldText("website", "Website", organization?.website || "", false));
+}
+
+function collectOrganizationPayload() {
+  const payload = {};
+  const groups = Array.from(organizationForm.querySelectorAll(".field-group"));
+  groups.forEach(group => {
+    const field = group.dataset.field;
+    const input = group.querySelector("input, textarea");
+    payload[field] = input ? normalizeString(input.value) : "";
+  });
+  return payload;
+}
+
+function openOrganizationEditor() {
+  buildOrganizationForm(organizationDoc || {});
+  show(organizationEditor);
+}
+
+function closeOrganizationEditor() {
+  hide(organizationEditor);
+  clearChildren(organizationForm);
 }
 
 function buildFieldDate(fieldKey, label, value = "") {
@@ -781,10 +976,13 @@ function buildResourceForm(resource) {
   resourceForm.appendChild(buildFieldText("Keywords", "Keywords", resource.Keywords || "", false));
 
   const resourceName = getResourceTitle(resource) || "Resource";
-  editorTitle.textContent = editingResourceMode === "create"
-    ? "Submit New Resource"
-    : `Submit Update: ${resourceName}`;
-  submitRequestBtn.textContent = editingResourceMode === "create" ? "Submit New Resource" : "Submit for Review";
+  editorTitle.textContent = editingPendingRequest
+    ? `Modify Pending Request: ${resourceName}`
+    : editingResourceMode === "create"
+      ? "Submit New Resource"
+      : `Submit Update: ${resourceName}`;
+  submitRequestBtn.textContent = editingPendingRequest ? "Update Pending Request" : editingResourceMode === "create" ? "Submit New Resource" : "Submit for Review";
+  deleteResourceRequestBtn?.classList.toggle("hidden", editingResourceMode !== "edit" || Boolean(editingPendingRequest));
 }
 
 function collectProposedData() {
@@ -855,6 +1053,7 @@ function collectProposedData() {
 }
 
 function openResourceEditor(resource) {
+  editingPendingRequest = null;
   editingResource = resource;
   editingResourceMode = "edit";
   buildResourceForm(resource);
@@ -888,10 +1087,97 @@ function createNewResourceDraft() {
 }
 
 function openNewResourceEditor() {
+  editingPendingRequest = null;
   editingResource = createNewResourceDraft();
   editingResourceMode = "create";
   buildResourceForm(editingResource);
   show(resourceEditor);
+}
+
+function closeResourceEditor() {
+  hide(resourceEditor);
+  editingPendingRequest = null;
+  editingResource = null;
+  editingResourceMode = "edit";
+}
+
+async function submitResourceRequest(requestType, proposedData, submitterNotes) {
+  const actor = getCurrentActor();
+  const normalizedRequestType = normalizeRequestType(requestType);
+  const relatedResourceId = normalizedRequestType === "resource_edit" || normalizedRequestType === "resource_delete"
+    ? normalizeString(editingResource?.id)
+    : "";
+  const resourceName = normalizedRequestType === "resource_delete"
+    ? getResourceTitle(editingResource)
+    : getResourceTitle(proposedData) || getResourceTitle(editingResource);
+
+  let requestId = normalizeString(editingPendingRequest?.id);
+  let summary = "";
+  let action = "request.submitted";
+
+  if (editingPendingRequest) {
+    await updateDoc(doc(db, "resource_change_requests", requestId), {
+      resourceId: relatedResourceId,
+      resourceName,
+      requestType: normalizedRequestType,
+      proposedData,
+      submitterNotes,
+      updatedAt: serverTimestamp()
+    });
+    summary = `Updated pending request for ${resourceName || requestId}`;
+    action = "request.updated";
+  } else {
+    const requestRef = await addDoc(collection(db, "resource_change_requests"), {
+      resourceId: relatedResourceId,
+      resourceName,
+      organizationId: normalizeString(membershipDoc?.organizationId),
+      submittedByUid: actor.uid,
+      submittedByEmail: actor.email,
+      requestType: normalizedRequestType,
+      status: "pending",
+      proposedData,
+      submitterNotes,
+      reviewNotes: "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    requestId = requestRef.id;
+    summary = normalizedRequestType === "resource_create"
+      ? `Submitted new resource request for ${resourceName || requestId}`
+      : normalizedRequestType === "resource_delete"
+        ? `Submitted delete request for ${resourceName || requestId}`
+        : `Submitted update request for ${resourceName || requestId}`;
+  }
+
+  await logOrgAuditEvent({
+    action,
+    entityType: "request",
+    entityId: requestId,
+    entityLabel: resourceName,
+    organizationId: normalizeString(membershipDoc?.organizationId),
+    relatedResourceId,
+    relatedRequestId: requestId,
+    summary,
+    details: {
+      requestType: normalizedRequestType,
+      submitterNotes,
+      changedFieldCount: Object.keys(proposedData || {}).length
+    }
+  });
+
+  alert(
+    editingPendingRequest
+      ? "Pending request updated."
+      : normalizedRequestType === "resource_create"
+      ? "New resource submitted for library review."
+      : normalizedRequestType === "resource_delete"
+        ? "Delete request submitted for library review."
+        : "Update submitted for library review."
+  );
+
+  closeResourceEditor();
+  await loadRequests();
+  await loadOwnedResources();
 }
 
 logoutBtn?.addEventListener("click", async () => {
@@ -903,13 +1189,61 @@ logoutBtn?.addEventListener("click", async () => {
 });
 
 cancelResourceBtn?.addEventListener("click", () => {
-  hide(resourceEditor);
-  editingResource = null;
-  editingResourceMode = "edit";
+  closeResourceEditor();
 });
 
 addResourceBtn?.addEventListener("click", () => {
   openNewResourceEditor();
+});
+
+editOrganizationBtn?.addEventListener("click", () => {
+  openOrganizationEditor();
+});
+
+cancelOrganizationBtn?.addEventListener("click", () => {
+  closeOrganizationEditor();
+});
+
+saveOrganizationBtn?.addEventListener("click", async () => {
+  if (!organizationDoc?.id) return;
+
+  const payload = collectOrganizationPayload();
+  const actor = getCurrentActor();
+
+  try {
+    await updateDoc(doc(db, "organizations", organizationDoc.id), {
+      primaryEmail: payload.primaryEmail,
+      phone: payload.phone,
+      website: payload.website,
+      updatedAt: serverTimestamp(),
+      updatedBy: actor.uid,
+      updatedByEmail: actor.email
+    });
+
+    organizationDoc = {
+      ...organizationDoc,
+      primaryEmail: payload.primaryEmail,
+      phone: payload.phone,
+      website: payload.website
+    };
+    renderOrganizationSummary();
+    closeOrganizationEditor();
+    await logOrgAuditEvent({
+      action: "organization.updated",
+      entityType: "organization",
+      entityId: organizationDoc.id,
+      entityLabel: normalizeString(organizationDoc.name),
+      organizationId: organizationDoc.id,
+      summary: `Updated organization details for ${normalizeString(organizationDoc.name) || organizationDoc.id}`,
+      details: {
+        updatedFields: ["primaryEmail", "phone", "website"]
+      }
+    });
+    alert("Organization details saved.");
+  } catch (err) {
+    console.error("Error saving organization details:", err);
+    alert("Error saving organization details. See console for details.");
+  }
 });
 
 submitRequestBtn?.addEventListener("click", async () => {
@@ -921,56 +1255,35 @@ submitRequestBtn?.addEventListener("click", async () => {
     return;
   }
 
-  const actor = getCurrentActor();
   const proposedData = sanitizeRequestedResourceData(collectProposedData());
   const submitterNotes = normalizeString(submitterNotesInput.value);
   const requestType = editingResourceMode === "create" ? "resource_create" : "resource_edit";
-  const resourceName = getResourceTitle(proposedData) || getResourceTitle(editingResource);
-  const relatedResourceId = editingResourceMode === "edit" ? normalizeString(editingResource.id) : "";
 
   try {
-    const requestRef = await addDoc(collection(db, "resource_change_requests"), {
-      resourceId: relatedResourceId,
-      resourceName,
-      organizationId: normalizeString(membershipDoc.organizationId),
-      submittedByUid: actor.uid,
-      submittedByEmail: actor.email,
-      requestType,
-      status: "pending",
-      proposedData,
-      submitterNotes,
-      reviewNotes: "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-
-    await logOrgAuditEvent({
-      action: "request.submitted",
-      entityType: "request",
-      entityId: requestRef.id,
-      entityLabel: resourceName,
-      organizationId: normalizeString(membershipDoc.organizationId),
-      relatedResourceId,
-      relatedRequestId: requestRef.id,
-      summary: `${editingResourceMode === "create" ? "Submitted new resource request for" : "Submitted update request for"} ${resourceName || requestRef.id}`,
-      details: {
-        requestType,
-        submitterNotes,
-        changedFieldCount: Object.keys(proposedData).length
-      }
-    });
-
-    alert(editingResourceMode === "create"
-      ? "New resource submitted for library review."
-      : "Update submitted for library review.");
-    hide(resourceEditor);
-    editingResource = null;
-    editingResourceMode = "edit";
-    await loadRequests();
-    await loadOwnedResources();
+    await submitResourceRequest(requestType, proposedData, submitterNotes);
   } catch (err) {
     console.error("Error submitting request:", err);
     alert("Error submitting request. See console for details.");
+  }
+});
+
+deleteResourceRequestBtn?.addEventListener("click", async () => {
+  if (!editingResource || editingResourceMode !== "edit") return;
+
+  const resourceName = getResourceTitle(editingResource) || "this resource";
+  const confirmed = window.confirm(
+    `Are you sure you want to delete "${resourceName}"?\n\nThis action cannot be undone. The deletion will be submitted to library staff for review before it is applied.`
+  );
+  if (!confirmed) return;
+
+  const submitterNotes = normalizeString(submitterNotesInput.value);
+  const proposedData = sanitizeRequestedResourceData(editingResource);
+
+  try {
+    await submitResourceRequest("resource_delete", proposedData, submitterNotes);
+  } catch (err) {
+    console.error("Error submitting delete request:", err);
+    alert("Error submitting delete request. See console for details.");
   }
 });
 
@@ -1004,7 +1317,7 @@ onAuthStateChanged(auth, async user => {
 
     hide(loginScreen);
     show(orgScreen);
-    setBanner(`Signed in as ${normalizeString(user.email)} for ${normalizeString(organizationDoc?.name) || "your organization"}. Changes require library approval before they go live.`);
+    setBanner(`Signed in as ${normalizeString(user.email)} for ${normalizeString(organizationDoc?.name) || "your organization"}. Organization contact details save immediately. Resource changes still require library approval before they go live.`);
   } catch (err) {
     console.error("Portal load error:", err);
     await signOut(auth);

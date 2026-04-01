@@ -542,7 +542,7 @@ function getRequestSummaryText(requestDoc) {
 
 function normalizeRequestStatus(value) {
   const status = normalizeString(value).toLowerCase();
-  if (status === "approved" || status === "rejected") return status;
+  if (status === "approved" || status === "rejected" || status === "cancelled") return status;
   return "pending";
 }
 
@@ -550,12 +550,14 @@ function getRequestStatusLabel(value) {
   const status = normalizeRequestStatus(value);
   if (status === "approved") return "accepted";
   if (status === "rejected") return "rejected";
+  if (status === "cancelled") return "cancelled";
   return "pending";
 }
 
 function normalizeRequestType(value) {
   const requestType = normalizeString(value).toLowerCase();
   if (requestType === "resource_create") return "resource_create";
+  if (requestType === "resource_delete") return "resource_delete";
   if (requestType === "quarterly_confirmation") return "quarterly_confirmation";
   return "resource_edit";
 }
@@ -563,6 +565,7 @@ function normalizeRequestType(value) {
 function getRequestTypeLabel(value) {
   const requestType = normalizeRequestType(value);
   if (requestType === "resource_create") return "New resource";
+  if (requestType === "resource_delete") return "Delete resource";
   if (requestType === "quarterly_confirmation") return "Quarterly no-change confirmation";
   return "Resource update";
 }
@@ -618,11 +621,20 @@ function buildRequestStatusMailPayload(requestDoc, nextStatus, reviewNotes) {
   const resourceId = normalizeString(requestDoc?.resourceId);
   const reviewedAt = new Date().toLocaleString();
   const orgPortalUrl = getPortalUrl();
-  const requestSubjectLabel = requestType === "resource_create" ? "resource submission" : "update";
+  const requestSubjectLabel = requestType === "resource_create"
+    ? "resource submission"
+    : requestType === "resource_delete"
+      ? "resource deletion request"
+      : "update";
   const intro = status === "approved"
     ? `Your Community Resource Finder ${requestSubjectLabel} for "${resourceName}" has been approved.`
     : `Your Community Resource Finder ${requestSubjectLabel} for "${resourceName}" has been rejected.`;
-  const subject = `[CRF] ${requestType === "resource_create" ? "Resource" : "Update"} ${status}: ${resourceName}`;
+  const subjectTypeLabel = requestType === "resource_create"
+    ? "Resource"
+    : requestType === "resource_delete"
+      ? "Delete"
+      : "Update";
+  const subject = `[CRF] ${subjectTypeLabel} ${status}: ${resourceName}`;
   const notesText = normalizeString(reviewNotes);
 
   const text = [
@@ -1343,6 +1355,24 @@ function buildRequestDiffList(currentResource, proposedData, requestDoc = null) 
   wrapper.appendChild(createEl("h4", { text: "Requested Changes" }));
 
   const list = createEl("div", { className: "request-diff-list" });
+  const requestType = normalizeRequestType(requestDoc?.requestType);
+
+  if (requestType === "resource_delete") {
+    const deleteCard = createEl("div", { className: "request-diff-card removed" });
+    deleteCard.appendChild(createEl("h5", { text: "Delete Request" }));
+    deleteCard.appendChild(createEl("span", {
+      className: "request-change-badge removed",
+      text: "Remove"
+    }));
+    deleteCard.appendChild(createEl("div", {
+      className: "request-value",
+      text: "The organization is requesting that this resource be deleted after library review."
+    }));
+    list.appendChild(deleteCard);
+    wrapper.appendChild(list);
+    return wrapper;
+  }
+
   const currentEditable = sanitizeRequestedResourceData(currentResource || {});
   const proposedEditable = sanitizeRequestedResourceData(proposedData || {});
 
@@ -1361,7 +1391,7 @@ function buildRequestDiffList(currentResource, proposedData, requestDoc = null) 
     emptyState.appendChild(createEl("h5", { text: "No changed fields detected" }));
     emptyState.appendChild(createEl("div", {
       className: "request-value empty",
-      text: normalizeString(requestDoc?.requestType) === "quarterly_confirmation"
+      text: requestType === "quarterly_confirmation"
         ? "The editor confirmed that the current live listing still looks correct and did not request content changes."
         : "The submitted request matches the current live values for all reviewable fields."
     }));
@@ -4443,6 +4473,9 @@ function openRequestEditor(requestDoc) {
   requestReviewNotes.value = normalizeString(requestDoc?.reviewNotes);
   clearChildren(requestSummary);
   setRequestEditMode(false);
+  if (editRequestBtn) {
+    editRequestBtn.disabled = normalizeRequestType(requestDoc?.requestType) === "resource_delete";
+  }
 
   const currentResource = resourceMeta.find(resource => resource.id === requestDoc.resourceId);
   requestSummary.appendChild(buildRequestMetaBlock(requestDoc));
@@ -4455,6 +4488,7 @@ closeRequestBtn?.addEventListener("click", () => {
   hide(requestEditor);
   editingRequestId = null;
   setRequestEditMode(false);
+  if (editRequestBtn) editRequestBtn.disabled = false;
 });
 
 async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overrideProposedData = null) {
@@ -4463,10 +4497,17 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
   const actor = getCurrentActorMetadata();
   const requestType = normalizeRequestType(requestDoc.requestType);
   const effectiveProposedData = sanitizeRequestedResourceData(overrideProposedData || requestDoc.proposedData);
-  const effectiveResourceName = getResourceTitle(effectiveProposedData) || normalizeString(requestDoc.resourceName);
+  const effectiveResourceName = requestType === "resource_delete"
+    ? normalizeString(requestDoc.resourceName)
+    : getResourceTitle(effectiveProposedData) || normalizeString(requestDoc.resourceName);
   let effectiveResourceId = normalizeString(requestDoc.resourceId);
 
   if (nextStatus === "approved") {
+    if (requestType === "resource_delete") {
+      if (effectiveResourceId) {
+        await deleteDoc(doc(db, "resources", effectiveResourceId));
+      }
+    } else {
     const verificationDate = requestType === "quarterly_confirmation"
       ? getTodayYyyyMmDd(getValueDate(requestDoc.reviewConfirmedAt) || new Date())
       : getTodayYyyyMmDd();
@@ -4498,6 +4539,7 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
     } else {
       resourcePayload.Organization = deleteField();
       await updateDoc(doc(db, "resources", effectiveResourceId), resourcePayload);
+    }
     }
   }
 
