@@ -50,8 +50,6 @@ Top-level files:
 - `assets/js/taxonomy-rules.js`: shared taxonomy normalization rules used by the admin category editor
 - `assets/js/contact-fields.js`: shared website and phone normalization helpers used by the app and admin
 - `assets/js/firebase.js`: Firebase app, Firestore, and Auth initialization
-- `assets/data/data.json`: legacy resource data snapshot retained for reference
-- `assets/data/categories.json`: canonical category/subcategory snapshot retained for reference
 - `assets/img/crf-logo.png`: Community Resource Finder logo
 - `assets/img/wcls-logo.png`: Washoe County Library System logo
 - `tools/set_admin_claim.mjs`: one-time script to grant or remove the Firebase `admin` custom claim
@@ -766,7 +764,7 @@ Optional flags:
 - `--limit 25`: test against a smaller subset first
 - `--report C:\path\to\report.json`: choose a custom report path
 
-By default, reports are written to `tools/reports/`.
+By default, reports are written to the ignored `tools/reports/` directory.
 
 ### Organization Management
 
@@ -989,8 +987,6 @@ If recreating the project from scratch:
 The current dataset appears to contain some inconsistent values, placeholder blanks, and formatting issues. Examples include:
 
 - blank fields represented as `" "` instead of empty strings
-- the legacy `assets/data/data.json` snapshot still contains old single-string website and phone formats
-- the legacy `assets/data/data.json` snapshot may not match the cleaned live taxonomy exactly
 
 Treat the data model as operationally useful but not yet normalized.
 
