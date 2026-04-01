@@ -136,7 +136,7 @@ Each document in `resources` is expected to look roughly like this:
 
 ```json
 {
-  "Organization": "Example Organization",
+  "resourceTitle": "Example Resource",
   "Description": "What the organization provides",
   "Address": "123 Main St",
   "City": "Reno",
@@ -192,6 +192,8 @@ Notes:
 - `IncludeInMap` can be stored as a boolean to explicitly include or exclude a resource from the future multi-resource map.
 - `Website` and `Phone` are legacy fields and should remain blank after migration.
 - `Last Verified` is stored as a string in `YYYY-MM-DD` format when entered through the admin UI.
+- `resourceTitle` is the public listing title shown in search results and details.
+- `Organization` is a legacy title field that older records may still carry during migration.
 - `organizationId` links a resource to its owning document in `organizations`.
 - `status` controls whether the resource is publicly readable; the public app and Firestore rules both treat only `published` resources as live.
 - `submissionState` is groundwork for the future review workflow.
@@ -595,7 +597,7 @@ After starting a local server, these pages should be available:
 
 The public search input searches across these fields:
 
-- `Organization`
+- `resourceTitle`
 - `Description`
 - `Categories`
 - `Subcategories`
@@ -618,7 +620,7 @@ The subcategory dropdown:
 
 ### Result Sorting
 
-Results are sorted alphabetically by `Organization`.
+Results are sorted alphabetically by `resourceTitle`.
 
 ### Details Panel
 
@@ -688,7 +690,7 @@ The Resources panel allows staff to:
 
 The current resource editor includes:
 
-- `Organization`
+- `Resource Title`
 - `Owning Organization`
 - `Publication Status`
 - `Submission State`

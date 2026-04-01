@@ -12,6 +12,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
@@ -25,6 +26,7 @@ import {
   formatNormalizationChange
 } from "./taxonomy-rules.js";
 import {
+  getResourceTitle,
   normalizeWebsiteList,
   normalizePhoneEntries,
   getPhoneDisplayText,
@@ -252,7 +254,7 @@ const REVIEW_REMINDER_DAYS = 90;
 const REVIEW_ADMIN_ATTENTION_DAYS = 365;
 const reviewRequestAccessMailto = "mailto:mwinterman@washoecounty.gov?subject=Community%20Resource%20Finder%20Editor%20Access%20Request";
 const orgEditableResourceFields = [
-  "Organization",
+  "resourceTitle",
   "Description",
   "DescriptionDelta",
   "Categories",
@@ -275,7 +277,7 @@ const orgEditableResourceFields = [
   "NotesDelta"
 ];
 const requestReviewFieldConfig = [
-  { field: "Organization", label: "Resource" },
+  { field: "resourceTitle", label: "Resource Title" },
   { field: "Description", label: "Short Description", type: "richtext" },
   { field: "Notes", label: "Detailed Description", type: "richtext" },
   { field: "Categories", label: "Categories", type: "string-array" },
@@ -338,6 +340,10 @@ function clearChildren(el) {
 
 function normalizeString(v) {
   return String(v ?? "").trim();
+}
+
+function getResourceTitleInputValue(resource) {
+  return getResourceTitle(resource);
 }
 
 function normalizeStringArray(value) {
@@ -700,8 +706,15 @@ async function logAuditEvent({
 }
 
 function getChangedFieldNames(beforeValue, afterValue, fields = []) {
+  const getComparableFieldValue = (source, field) => (
+    field === "resourceTitle"
+      ? source?.resourceTitle ?? source?.Organization
+      : source?.[field]
+  );
+
   return fields.filter(field =>
-    normalizeRequestComparableValue(beforeValue?.[field]) !== normalizeRequestComparableValue(afterValue?.[field])
+    normalizeRequestComparableValue(getComparableFieldValue(beforeValue, field)) !==
+    normalizeRequestComparableValue(getComparableFieldValue(afterValue, field))
   );
 }
 
@@ -1063,7 +1076,9 @@ function sanitizeRequestedResourceData(value) {
   const payload = {};
 
   orgEditableResourceFields.forEach(field => {
-    const rawValue = source[field];
+    const rawValue = field === "resourceTitle"
+      ? source.resourceTitle ?? source.Organization
+      : source[field];
 
     if (field === "Description" || field === "Notes") {
       payload[field] = sanitizeRichTextHtml(rawValue);
@@ -1362,7 +1377,7 @@ function buildRequestEditFieldset(data) {
   clearChildren(requestEditForm);
 
   requestEditForm.appendChild(createEl("h4", { text: "Edit Proposed Changes" }));
-  requestEditForm.appendChild(buildFieldText("Organization", "Resource", data.Organization || "", true));
+  requestEditForm.appendChild(buildFieldText("resourceTitle", "Resource Title", getResourceTitleInputValue(data), true));
   requestEditForm.appendChild(buildFieldRichText(
     "Description",
     "Short Description",
@@ -1723,7 +1738,7 @@ function setActivePanel(panelName) {
 // RESOURCES
 // ------------------------------------------------------
 function getResourceDisplayName(resource) {
-  return normalizeString(resource?.Organization) || "(Unnamed)";
+  return getResourceTitle(resource) || "(Unnamed)";
 }
 
 async function loadResources(options = {}) {
@@ -2281,7 +2296,7 @@ function buildResourceForm(data) {
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  resourceForm.appendChild(buildFieldText("Organization", "Resource", data.Organization || "", true));
+  resourceForm.appendChild(buildFieldText("resourceTitle", "Resource Title", getResourceTitleInputValue(data), true));
   resourceForm.appendChild(buildFieldSelect(
     "organizationId",
     "Owning Organization",
@@ -2438,7 +2453,7 @@ function collectResourcePayload() {
 }
 
 saveResourceBtn?.addEventListener("click", async () => {
-  const orgInput = resourceForm.querySelector('.field-group[data-field="Organization"] input');
+  const orgInput = resourceForm.querySelector('.field-group[data-field="resourceTitle"] input');
   if (orgInput && typeof orgInput.checkValidity === "function" && !orgInput.checkValidity()) {
     orgInput.reportValidity?.();
     return;
@@ -2469,6 +2484,8 @@ saveResourceBtn?.addEventListener("click", async () => {
     payload.createdByEmail = actor.email;
     payload.lastSubmittedAt = serverTimestamp();
     payload.lastSubmittedBy = actor.uid;
+  } else {
+    payload.Organization = deleteField();
   }
 
   if (!editingResourceData?.lastSubmittedAt) {
@@ -2503,10 +2520,10 @@ saveResourceBtn?.addEventListener("click", async () => {
         action: "resource.updated",
         entityType: "resource",
         entityId: editingResourceId,
-        entityLabel: normalizeString(payload.Organization) || normalizeString(previousData.Organization),
+        entityLabel: getResourceTitle(payload) || getResourceTitle(previousData),
         organizationId: normalizeString(payload.organizationId),
         relatedResourceId: editingResourceId,
-        summary: `Updated resource ${normalizeString(payload.Organization) || normalizeString(previousData.Organization) || editingResourceId}`,
+        summary: `Updated resource ${getResourceTitle(payload) || getResourceTitle(previousData) || editingResourceId}`,
         details: {
           changedFields: getChangedFieldNames(previousData, payload, Object.keys(payload))
         }
@@ -2519,10 +2536,10 @@ saveResourceBtn?.addEventListener("click", async () => {
         action: "resource.created",
         entityType: "resource",
         entityId: createdRef.id,
-        entityLabel: normalizeString(payload.Organization),
+        entityLabel: getResourceTitle(payload),
         organizationId: normalizeString(payload.organizationId),
         relatedResourceId: createdRef.id,
-        summary: `Created resource ${normalizeString(payload.Organization) || createdRef.id}`,
+        summary: `Created resource ${getResourceTitle(payload) || createdRef.id}`,
         details: {
           status: normalizeString(payload.status),
           submissionState: normalizeString(payload.submissionState)
@@ -2554,10 +2571,10 @@ deleteResourceBtn?.addEventListener("click", async () => {
       action: "resource.deleted",
       entityType: "resource",
       entityId: editingResourceId,
-      entityLabel: normalizeString(previousData.Organization),
+      entityLabel: getResourceTitle(previousData),
       organizationId: normalizeString(previousData.organizationId),
       relatedResourceId: editingResourceId,
-      summary: `Deleted resource ${normalizeString(previousData.Organization) || editingResourceId}`,
+      summary: `Deleted resource ${getResourceTitle(previousData) || editingResourceId}`,
       details: {}
     });
     hide(resourceEditor);
@@ -4446,7 +4463,7 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
   const actor = getCurrentActorMetadata();
   const requestType = normalizeRequestType(requestDoc.requestType);
   const effectiveProposedData = sanitizeRequestedResourceData(overrideProposedData || requestDoc.proposedData);
-  const effectiveResourceName = normalizeString(effectiveProposedData.Organization) || normalizeString(requestDoc.resourceName);
+  const effectiveResourceName = getResourceTitle(effectiveProposedData) || normalizeString(requestDoc.resourceName);
   let effectiveResourceId = normalizeString(requestDoc.resourceId);
 
   if (nextStatus === "approved") {
@@ -4479,6 +4496,7 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
       const createdRef = await addDoc(collection(db, "resources"), resourcePayload);
       effectiveResourceId = createdRef.id;
     } else {
+      resourcePayload.Organization = deleteField();
       await updateDoc(doc(db, "resources", effectiveResourceId), resourcePayload);
     }
   }

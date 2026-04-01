@@ -15,6 +15,7 @@ import {
   onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import {
+  getResourceTitle,
   normalizeWebsiteList,
   normalizePhoneEntries
 } from "./contact-fields.js";
@@ -61,7 +62,7 @@ const quillFormats = ["bold", "italic", "underline", "list", "link"];
 const richTextAllowedTags = ["a", "br", "em", "li", "ol", "p", "strong", "u", "ul"];
 const richTextAllowedAttrs = ["href"];
 const orgEditableResourceFields = [
-  "Organization",
+  "resourceTitle",
   "Description",
   "DescriptionDelta",
   "Categories",
@@ -251,7 +252,9 @@ function sanitizeRequestedResourceData(value) {
   const payload = {};
 
   orgEditableResourceFields.forEach(field => {
-    const rawValue = source[field];
+    const rawValue = field === "resourceTitle"
+      ? source.resourceTitle ?? source.Organization
+      : source[field];
 
     if (field === "Description" || field === "Notes") {
       payload[field] = sanitizeRichTextHtml(rawValue);
@@ -371,7 +374,7 @@ async function loadOwnedResources() {
   const snap = await getDocs(query(collection(db, "resources"), where("organizationId", "==", orgId)));
   const resources = [];
   snap.forEach(ds => resources.push({ id: ds.id, ...ds.data() }));
-  resources.sort((a, b) => normalizeString(a.Organization).localeCompare(normalizeString(b.Organization)));
+  resources.sort((a, b) => getResourceTitle(a).localeCompare(getResourceTitle(b)));
   resourceMeta = resources;
   renderResourceList(resources);
 }
@@ -437,7 +440,7 @@ function renderResourceList(resources) {
     const row = createEl("div", { className: "list-row list-row-stacked" });
     row.appendChild(createEl("div", {
       className: "list-row-title",
-      text: normalizeString(resource.Organization) || "(Unnamed resource)"
+      text: getResourceTitle(resource) || "(Unnamed resource)"
     }));
 
     const pendingCount = requestMeta.filter(requestDoc =>
@@ -758,7 +761,7 @@ function buildResourceForm(resource) {
   clearChildren(resourceForm);
   submitterNotesInput.value = "";
 
-  resourceForm.appendChild(buildFieldText("Organization", "Resource", resource.Organization || "", true));
+  resourceForm.appendChild(buildFieldText("resourceTitle", "Resource Title", getResourceTitle(resource), true));
   resourceForm.appendChild(buildFieldRichText("Description", "Short Description", resource.Description || "", resource.DescriptionDelta || null));
   resourceForm.appendChild(buildFieldRichText("Notes", "Detailed Description", resource.Notes || "", resource.NotesDelta || null));
   resourceForm.appendChild(buildNestedCategorySelector(resource.Categories, resource.Subcategories));
@@ -777,7 +780,7 @@ function buildResourceForm(resource) {
   resourceForm.appendChild(buildFieldText("Languages", "Languages", resource.Languages || "", false));
   resourceForm.appendChild(buildFieldText("Keywords", "Keywords", resource.Keywords || "", false));
 
-  const resourceName = normalizeString(resource.Organization) || "Resource";
+  const resourceName = getResourceTitle(resource) || "Resource";
   editorTitle.textContent = editingResourceMode === "create"
     ? "Submit New Resource"
     : `Submit Update: ${resourceName}`;
@@ -860,7 +863,7 @@ function openResourceEditor(resource) {
 
 function createNewResourceDraft() {
   return {
-    Organization: "",
+    resourceTitle: "",
     Description: "",
     DescriptionDelta: null,
     Categories: [],
@@ -912,7 +915,7 @@ addResourceBtn?.addEventListener("click", () => {
 submitRequestBtn?.addEventListener("click", async () => {
   if (!editingResource || !membershipDoc) return;
 
-  const orgInput = resourceForm.querySelector('.field-group[data-field="Organization"] input');
+  const orgInput = resourceForm.querySelector('.field-group[data-field="resourceTitle"] input');
   if (orgInput && typeof orgInput.checkValidity === "function" && !orgInput.checkValidity()) {
     orgInput.reportValidity?.();
     return;
@@ -922,7 +925,7 @@ submitRequestBtn?.addEventListener("click", async () => {
   const proposedData = sanitizeRequestedResourceData(collectProposedData());
   const submitterNotes = normalizeString(submitterNotesInput.value);
   const requestType = editingResourceMode === "create" ? "resource_create" : "resource_edit";
-  const resourceName = normalizeString(proposedData.Organization) || normalizeString(editingResource.Organization);
+  const resourceName = getResourceTitle(proposedData) || getResourceTitle(editingResource);
   const relatedResourceId = editingResourceMode === "edit" ? normalizeString(editingResource.id) : "";
 
   try {

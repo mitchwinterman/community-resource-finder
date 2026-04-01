@@ -7,6 +7,7 @@ import { initializeApp, applicationDefault, cert, getApps } from "firebase-admin
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 import {
+  getResourceTitle,
   normalizeString,
   normalizeWebsiteList,
   normalizePhoneEntries,
@@ -110,7 +111,7 @@ function buildPlannedOrgUpdate(org, resource) {
 }
 
 function pickResourceName(resource) {
-  return normalizeString(resource?.Organization) || "(Unnamed resource)";
+  return getResourceTitle(resource) || "(Unnamed resource)";
 }
 
 function pickOrgName(org) {

@@ -7,6 +7,7 @@ import process from "node:process";
 
 import admin from "firebase-admin";
 import {
+  getResourceTitle,
   normalizeWebsiteList,
   normalizePhoneEntries,
   getPhoneDisplayText,
@@ -42,7 +43,7 @@ const FAILED_REVIEW_RETRY_HOURS = 24;
 const REVIEW_TOKEN_EXPIRATION_DAYS = 120;
 const requestAccessMailto = "mailto:mwinterman@washoecounty.gov?subject=Community%20Resource%20Finder%20Editor%20Access%20Request";
 const reviewRequestEditableFields = [
-  "Organization",
+  "resourceTitle",
   "Description",
   "DescriptionDelta",
   "Categories",
@@ -106,7 +107,9 @@ function sanitizeRequestSnapshot(resource) {
   const payload = {};
 
   reviewRequestEditableFields.forEach(field => {
-    const rawValue = source[field];
+    const rawValue = field === "resourceTitle"
+      ? source.resourceTitle ?? source.Organization
+      : source[field];
 
     if (field === "DescriptionDelta" || field === "NotesDelta") {
       payload[field] = cloneStructuredValue(rawValue);
@@ -913,7 +916,7 @@ async function createQuarterlyReviewDocs({ recipient, organization, dueResources
       organizationId: normalizeString(organization?.id),
       organizationName: normalizeString(organization?.name),
       resourceId: normalizeString(resource?.id),
-      resourceName: normalizeString(resource?.Organization),
+      resourceName: getResourceTitle(resource),
       recipientEmail: normalizeString(recipient?.email),
       recipientType: normalizeString(recipient?.type) || "organization_editor",
       recipientUid: normalizeString(recipient?.uid),
@@ -930,7 +933,7 @@ async function createQuarterlyReviewDocs({ recipient, organization, dueResources
       token,
       resource,
       resourceId: normalizeString(resource?.id),
-      resourceName: normalizeString(resource?.Organization) || "Resource listing",
+      resourceName: getResourceTitle(resource) || "Resource listing",
       reviewAnchorDate,
       confirmUrl: `${publicBaseUrl}/review.html?token=${encodeURIComponent(token)}`
     });
@@ -1111,7 +1114,7 @@ async function processConfirmedReviewConfirmations(limit) {
       const proposedData = sanitizeRequestSnapshot(resource);
       const requestRef = await db.collection("resource_change_requests").add({
         resourceId,
-        resourceName: normalizeString(confirmation.resourceName) || normalizeString(resource.Organization) || resourceId,
+        resourceName: normalizeString(confirmation.resourceName) || getResourceTitle(resource) || resourceId,
         organizationId: normalizeString(confirmation.organizationId) || normalizeString(resource.organizationId),
         submittedByUid: normalizeString(confirmation.recipientUid),
         submittedByEmail: normalizeString(confirmation.recipientEmail),

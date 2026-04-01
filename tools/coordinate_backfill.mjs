@@ -64,6 +64,10 @@ function normalizeName(value) {
   return normalizeString(value) || "(unnamed resource)";
 }
 
+function getResourceTitle(resource) {
+  return normalizeString(resource?.resourceTitle ?? resource?.Organization);
+}
+
 function formatResourceAddress(resource) {
   return [resource?.Address, resource?.City, resource?.Zip]
     .map(part => normalizeString(part))
@@ -277,7 +281,7 @@ function toPreviewEntry(docSnap) {
   const resource = docSnap.data();
   return {
     id: docSnap.id,
-    name: normalizeName(resource?.Organization),
+    name: normalizeName(getResourceTitle(resource)),
     address: formatResourceAddress(resource),
     existingLatitude: normalizeCoordinateValue(resource?.Latitude),
     existingLongitude: normalizeCoordinateValue(resource?.Longitude),

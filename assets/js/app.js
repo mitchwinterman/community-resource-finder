@@ -2,6 +2,7 @@
 
 import { db } from "./firebase.js";
 import {
+    getResourceTitle,
     normalizeWebsiteList,
     normalizePhoneEntries,
     getPhoneHref,
@@ -523,7 +524,7 @@ function createMapInfoMessage(titleText, bodyText) {
 }
 
 function createMarkerPopupHtml(resource) {
-    const name = escapeHtml(normalizeString(resource?.Organization) || "No name");
+    const name = escapeHtml(getResourceTitle(resource) || "No name");
     const address = escapeHtml([
         normalizeString(resource?.Address),
         normalizeString(resource?.City),
@@ -1010,8 +1011,8 @@ function createCopyAddressButton(address) {
 
 function sortByOrganizationInPlace(list) {
     list.sort((a, b) => {
-        const nameA = normalizeString(a.Organization).toLowerCase();
-        const nameB = normalizeString(b.Organization).toLowerCase();
+        const nameA = getResourceTitle(a).toLowerCase();
+        const nameB = getResourceTitle(b).toLowerCase();
         if (nameA < nameB) return -1;
         if (nameA > nameB) return 1;
         return 0;
@@ -1047,7 +1048,7 @@ function renderResults(resources) {
         title.className = "card-title";
 
         const strong = document.createElement("strong");
-        strong.textContent = normalizeString(resource.Organization) || "No name";
+        strong.textContent = getResourceTitle(resource) || "No name";
         title.appendChild(strong);
 
         const description = createTextBlock(
@@ -1093,7 +1094,7 @@ function showDetails(resource, options = {}) {
     const titleBlock = document.createElement("div");
     titleBlock.className = "details-title-block";
     titleBlock.appendChild(
-        createTextBlock("div", "details-title", normalizeString(resource.Organization) || "No name")
+        createTextBlock("div", "details-title", getResourceTitle(resource) || "No name")
     );
     appendChipGroupTo(titleBlock, "Categories", resource.Categories);
     rightPanelContent.appendChild(titleBlock);
@@ -1259,7 +1260,7 @@ function filterResourcesForSearch(resources, searchTerm) {
         const phones = getResourcePhoneNumbers(resource);
         const websites = getResourceWebsites(resource);
         const searchFields = [
-            normalizeString(resource.Organization),
+            getResourceTitle(resource),
             getPlainText(resource.Description),
             categories.join(" "),
             subcategories.join(" "),

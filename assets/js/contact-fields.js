@@ -2,6 +2,11 @@ export function normalizeString(value) {
   return String(value ?? "").trim();
 }
 
+export function getResourceTitle(value) {
+  if (!value || typeof value !== "object") return "";
+  return normalizeString(value.resourceTitle ?? value.Organization);
+}
+
 function dedupeStrings(values) {
   const seen = new Set();
   const result = [];
