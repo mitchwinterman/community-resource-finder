@@ -84,6 +84,37 @@ function normalizeBaseUrl(value) {
   }
 }
 
+function buildCustomPasswordActionUrl(actionUrl) {
+  const fallbackUrl = `${publicBaseUrl}/auth.html`;
+  const normalized = normalizeString(actionUrl);
+  if (!normalized) return fallbackUrl;
+
+  try {
+    const parsed = new URL(normalized);
+    const oobCode = normalizeString(parsed.searchParams.get("oobCode"));
+    const mode = normalizeString(parsed.searchParams.get("mode")) || "resetPassword";
+    const continueUrl = normalizeString(parsed.searchParams.get("continueUrl")) || `${publicBaseUrl}/login.html`;
+    const customUrl = new URL(`${publicBaseUrl}/auth.html`);
+
+    if (!oobCode) {
+      return fallbackUrl;
+    }
+
+    customUrl.searchParams.set("mode", mode);
+    customUrl.searchParams.set("oobCode", oobCode);
+    customUrl.searchParams.set("continueUrl", continueUrl);
+
+    const lang = normalizeString(parsed.searchParams.get("lang"));
+    if (lang) {
+      customUrl.searchParams.set("lang", lang);
+    }
+
+    return customUrl.toString();
+  } catch {
+    return fallbackUrl;
+  }
+}
+
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
   return value.map(item => normalizeString(item)).filter(Boolean);
@@ -764,7 +795,8 @@ async function processPendingInvites(limit) {
       const actionCodeSettings = {
         url: `${publicBaseUrl}/login.html`
       };
-      const setupLink = await auth.generatePasswordResetLink(email, actionCodeSettings);
+      const generatedSetupLink = await auth.generatePasswordResetLink(email, actionCodeSettings);
+      const setupLink = buildCustomPasswordActionUrl(generatedSetupLink);
 
       const organizationSnap = await db.collection("organizations").doc(normalizeString(claimed.organizationId)).get();
       const organizationName = normalizeString(organizationSnap.data()?.name) || "your organization";
