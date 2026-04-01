@@ -1078,7 +1078,12 @@ function showDetails(resource, options = {}) {
     updateSelectedResultCardState(resourceId);
 
     selectedResourceId = resourceId;
-    if (activeMapScope === "results" || activeRightPanel === "map") {
+    if (activeMapScope === "results") {
+        // Selecting a list item should leave the aggregate results map and focus the chosen resource.
+        activeMapScope = "selected";
+    }
+
+    if (activeRightPanel === "map") {
         renderMapView();
         if (updateHistory) {
             updateUrlState();
