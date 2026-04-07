@@ -98,6 +98,8 @@ const organizationPrimaryEmailInput = document.getElementById("organization-prim
 const organizationPhoneInput = document.getElementById("organization-phone-input");
 const organizationWebsiteInput = document.getElementById("organization-website-input");
 const organizationNotesInput = document.getElementById("organization-notes-input");
+const organizationResourcesList = document.getElementById("organization-resources-list");
+const organizationResourcesHelper = document.getElementById("organization-resources-helper");
 const addOrganizationBtn = document.getElementById("add-organization-btn");
 const saveOrganizationBtn = document.getElementById("save-organization-btn");
 const deleteOrganizationBtn = document.getElementById("delete-organization-btn");
@@ -1058,6 +1060,56 @@ function refreshOrganizationMembershipSection() {
   renderMembershipList(getMembershipsForOrganization(editingOrganizationId));
 }
 
+function openOwnedOrganizationResource(resource) {
+  if (!resource?.id) return;
+  setActivePanel("resources");
+  openResourceEditor(resource.id, resource);
+  renderResourceList(resourceMeta);
+}
+
+function refreshOrganizationOwnedResourceSection() {
+  if (!organizationResourcesList || !organizationResourcesHelper) return;
+
+  if (!editingOrganizationId) {
+    organizationResourcesHelper.textContent = "Save this organization first, then owned resources will appear here.";
+    organizationResourcesList.textContent = "";
+    return;
+  }
+
+  const ownedResources = resourceMeta
+    .filter(resource => normalizeString(resource.organizationId) === editingOrganizationId)
+    .sort((a, b) => getResourceDisplayName(a).localeCompare(getResourceDisplayName(b)));
+
+  organizationResourcesHelper.textContent = ownedResources.length
+    ? "Click a resource to open it in the Resources editor."
+    : "No resources currently reference this organization.";
+
+  clearChildren(organizationResourcesList);
+  if (!ownedResources.length) {
+    return;
+  }
+
+  ownedResources.forEach(resource => {
+    const row = createEl("div", {
+      className: "list-row list-row-stacked",
+      attrs: { "data-resource-id": resource.id }
+    });
+    row.appendChild(createEl("div", { className: "list-row-title", text: getResourceDisplayName(resource) }));
+
+    const metaParts = [
+      normalizeString(resource.status) || "published",
+      normalizeString(resource.submissionState) || "approved"
+    ];
+    row.appendChild(createEl("div", {
+      className: "list-row-meta",
+      text: metaParts.join(" | ")
+    }));
+
+    row.addEventListener("click", () => openOwnedOrganizationResource(resource));
+    organizationResourcesList.appendChild(row);
+  });
+}
+
 function refreshOrganizationInviteSection() {
   if (!inviteList || !inviteSectionHelper || !addInviteBtn) return;
 
@@ -1798,6 +1850,7 @@ async function loadResources(options = {}) {
 
     resourceMeta = resources;
     renderResourceList(resources);
+    refreshOrganizationOwnedResourceSection();
 
     if (preserveEditorId) {
       const refreshedResource = resources.find(item => item.id === preserveEditorId);
@@ -2710,6 +2763,7 @@ function openOrganizationEditor(org) {
   organizationWebsiteInput.value = normalizeString(org?.website);
   organizationNotesInput.value = normalizeString(org?.notes);
 
+  refreshOrganizationOwnedResourceSection();
   hide(membershipEditor);
   editingMembershipId = null;
   membershipUidInput.disabled = false;
@@ -2739,6 +2793,7 @@ addOrganizationBtn?.addEventListener("click", () => {
 cancelOrganizationBtn?.addEventListener("click", () => {
   hide(organizationEditor);
   editingOrganizationId = null;
+  refreshOrganizationOwnedResourceSection();
   hide(membershipEditor);
   editingMembershipId = null;
   membershipUidInput.disabled = false;
