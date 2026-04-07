@@ -103,6 +103,22 @@ async function loadCategories() {
     }
 }
 
+async function loadOrganizations() {
+    try {
+        const snap = await getDocs(collection(db, "organizations"));
+        const organizations = new Map();
+        snap.forEach(docSnap => {
+            const name = normalizeString(docSnap.data()?.name);
+            if (!name) return;
+            organizations.set(docSnap.id, name);
+        });
+        return organizations;
+    } catch (err) {
+        console.error("ORGANIZATION LOAD ERROR (Firestore organizations):", err);
+        return new Map();
+    }
+}
+
 // -----------------------------
 // DOM ELEMENTS
 // -----------------------------
@@ -112,6 +128,7 @@ const subcategorySelect = document.getElementById("subcategorySelect");
 const resetButton = document.getElementById("resetButton");
 const brandHomeLink = document.querySelector(".brand-home-link");
 
+const resultsPanel = document.querySelector(".results-panel");
 const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
 const rightPanelContent = document.getElementById("rightPanelContent");
@@ -140,6 +157,9 @@ let activeFilters = {
 };
 let latestLoadRequestId = 0;
 const resourceQueryCache = new Map();
+const organizationNameById = new Map();
+const stackedLayoutMediaQuery = window.matchMedia("(max-width: 900px)");
+let resultsPanelHeightSyncQueued = false;
 
 // -----------------------------
 // HELPER FUNCTIONS
@@ -215,6 +235,12 @@ function formatSubcategoryLabel(label) {
     return specialSubcategoryCaps[lower] || label;
 }
 
+function getParentOrganizationName(resource) {
+    const organizationId = normalizeString(resource?.organizationId);
+    if (!organizationId) return "";
+    return normalizeString(organizationNameById.get(organizationId));
+}
+
 function clearElement(el) {
     if (!el) return;
     el.replaceChildren();
@@ -223,6 +249,38 @@ function clearElement(el) {
 function renderDetailsShell() {
     clearElement(rightPanelContent);
     updateRightPanelToggleUi();
+}
+
+function clearResultsPanelHeight() {
+    if (!resultsPanel) return;
+    resultsPanel.style.height = "";
+    resultsPanel.style.maxHeight = "";
+}
+
+function syncResultsPanelHeight() {
+    resultsPanelHeightSyncQueued = false;
+
+    if (!resultsPanel || !detailsDiv) return;
+
+    if (stackedLayoutMediaQuery.matches) {
+        clearResultsPanelHeight();
+        return;
+    }
+
+    const detailsHeight = Math.ceil(detailsDiv.getBoundingClientRect().height);
+    if (!detailsHeight) {
+        clearResultsPanelHeight();
+        return;
+    }
+
+    resultsPanel.style.height = `${detailsHeight}px`;
+    resultsPanel.style.maxHeight = `${detailsHeight}px`;
+}
+
+function queueResultsPanelHeightSync() {
+    if (resultsPanelHeightSyncQueued) return;
+    resultsPanelHeightSyncQueued = true;
+    window.requestAnimationFrame(syncResultsPanelHeight);
 }
 
 function buildResourceQueryCacheKey(categoryFilter, subcategoryFilter) {
@@ -571,6 +629,7 @@ function renderMapView() {
             "Map library unavailable",
             "Leaflet did not load, so the map cannot be shown right now."
         ));
+        queueResultsPanelHeightSync();
         return;
     }
 
@@ -587,6 +646,7 @@ function renderMapView() {
             "No mappable results",
             "None of the currently filtered results have coordinates and are included in the map."
         ));
+        queueResultsPanelHeightSync();
         return;
     }
 
@@ -596,6 +656,7 @@ function renderMapView() {
             "Select a resource first",
             "Choose a result on the left to view a map for that resource."
         ));
+        queueResultsPanelHeightSync();
         return;
     }
 
@@ -605,6 +666,7 @@ function renderMapView() {
             "This resource is not mappable yet",
             "The selected resource either has no coordinates yet or has been marked as not included in the map."
         ));
+        queueResultsPanelHeightSync();
         return;
     }
 
@@ -702,6 +764,7 @@ function renderMapView() {
         leafletMap.setView(defaultMapCenter, 10);
     }, 50);
 
+    queueResultsPanelHeightSync();
 }
 
 function refreshRightPanel(options = {}) {
@@ -710,6 +773,7 @@ function refreshRightPanel(options = {}) {
 
     if (activeMapScope === "results" || activeRightPanel === "map") {
         renderMapView();
+        queueResultsPanelHeightSync();
         if (updateHistory) updateUrlState();
         if (focusPanel) detailsDiv?.focus();
         return;
@@ -724,6 +788,7 @@ function refreshRightPanel(options = {}) {
     }
 
     renderDetailsEmptyState();
+    queueResultsPanelHeightSync();
     if (updateHistory) updateUrlState();
 }
 
@@ -739,6 +804,7 @@ function renderDetailsEmptyState() {
     empty.appendChild(small);
 
     rightPanelContent.appendChild(empty);
+    queueResultsPanelHeightSync();
 }
 
 function renderStatusCard(container, message) {
@@ -1101,6 +1167,9 @@ function showDetails(resource, options = {}) {
     titleBlock.appendChild(
         createTextBlock("div", "details-title", getResourceTitle(resource) || "No name")
     );
+    appendDetailFieldTo(titleBlock, "Parent Organization", getParentOrganizationName(resource), {
+        valueClassName: "details-parent-organization"
+    });
     appendChipGroupTo(titleBlock, "Categories", resource.Categories);
     rightPanelContent.appendChild(titleBlock);
 
@@ -1174,6 +1243,8 @@ function showDetails(resource, options = {}) {
     if (hasProgramDetails) {
         rightPanelContent.appendChild(detailsSection.section);
     }
+
+    queueResultsPanelHeightSync();
 
     if (updateHistory) {
         updateUrlState();
@@ -1329,8 +1400,16 @@ async function init() {
     renderDetailsEmptyState();
     updateResultCount(0);
 
-    const rawCats = await loadCategories();
+    const [rawCats, rawOrganizations] = await Promise.all([
+        loadCategories(),
+        loadOrganizations()
+    ]);
     const initialState = getUrlState();
+
+    organizationNameById.clear();
+    rawOrganizations.forEach((name, id) => {
+        organizationNameById.set(id, name);
+    });
 
     const categoryLabels = rawCats ? Object.keys(rawCats) : [];
     categoryOptions = [];
@@ -1373,6 +1452,7 @@ async function init() {
     };
 
     await applyFilters();
+    queueResultsPanelHeightSync();
 }
 
 // -----------------------------
@@ -1452,6 +1532,23 @@ window.addEventListener("popstate", () => {
     };
     void applyFilters();
 });
+
+window.addEventListener("resize", queueResultsPanelHeightSync);
+if (typeof stackedLayoutMediaQuery.addEventListener === "function") {
+    stackedLayoutMediaQuery.addEventListener("change", queueResultsPanelHeightSync);
+} else if (typeof stackedLayoutMediaQuery.addListener === "function") {
+    stackedLayoutMediaQuery.addListener(queueResultsPanelHeightSync);
+}
+
+if (typeof ResizeObserver === "function" && detailsDiv) {
+    const detailsPanelResizeObserver = new ResizeObserver(() => {
+        queueResultsPanelHeightSync();
+    });
+    detailsPanelResizeObserver.observe(detailsDiv);
+    if (rightPanelContent) {
+        detailsPanelResizeObserver.observe(rightPanelContent);
+    }
+}
 
 // -----------------------------
 // Start app

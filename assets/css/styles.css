@@ -455,6 +455,12 @@ input[type="text"]:focus-visible {
     margin-bottom: 0;
 }
 
+.details-parent-organization {
+    font-size: 15px;
+    line-height: 1.5;
+    color: #334155;
+}
+
 .details-priority-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
