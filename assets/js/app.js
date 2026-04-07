@@ -125,6 +125,7 @@ async function loadOrganizations() {
 const searchInput = document.getElementById("searchBox");
 const categorySelect = document.getElementById("categorySelect");
 const subcategorySelect = document.getElementById("subcategorySelect");
+const organizationSelect = document.getElementById("organizationSelect");
 const resetButton = document.getElementById("resetButton");
 const brandHomeLink = document.querySelector(".brand-home-link");
 
@@ -153,7 +154,8 @@ let leafletMap = null;
 let activeFilters = {
     search: "",
     category: "all",
-    subcategory: "all"
+    subcategory: "all",
+    organization: "all"
 };
 let latestLoadRequestId = 0;
 const resourceQueryCache = new Map();
@@ -215,6 +217,11 @@ function normalizeFilterValue(value) {
     return normalized || "all";
 }
 
+function normalizeOrganizationFilterValue(value) {
+    const normalized = normalizeString(value);
+    return normalized || "all";
+}
+
 function normalizeTaxonomyMatchValue(value) {
     return normalizeString(value)
         .toLowerCase()
@@ -239,6 +246,60 @@ function getParentOrganizationName(resource) {
     const organizationId = normalizeString(resource?.organizationId);
     if (!organizationId) return "";
     return normalizeString(organizationNameById.get(organizationId));
+}
+
+function getOrganizationFilterOptions(resources, selectedOrganization = "all") {
+    const selectedOrganizationId = normalizeOrganizationFilterValue(selectedOrganization);
+    const optionsById = new Map();
+
+    if (selectedOrganizationId !== "all") {
+        const selectedLabel = normalizeString(organizationNameById.get(selectedOrganizationId));
+        if (selectedLabel) {
+            optionsById.set(selectedOrganizationId, selectedLabel);
+        }
+    }
+
+    (Array.isArray(resources) ? resources : []).forEach(resource => {
+        const organizationId = normalizeString(resource?.organizationId);
+        const organizationName = getParentOrganizationName(resource);
+        if (!organizationId || !organizationName) return;
+        if (!optionsById.has(organizationId)) {
+            optionsById.set(organizationId, organizationName);
+        }
+    });
+
+    const options = Array.from(optionsById.entries())
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+    if (selectedOrganizationId !== "all") {
+        return options.filter(option => option.value === selectedOrganizationId);
+    }
+
+    return options;
+}
+
+function populateOrganizationFilter(resources, selectedOrganization = "all") {
+    if (!organizationSelect) return;
+
+    const selectedOrganizationId = normalizeOrganizationFilterValue(selectedOrganization);
+    const options = getOrganizationFilterOptions(resources, selectedOrganizationId);
+    organizationSelect.innerHTML = "";
+
+    const allOption = document.createElement("option");
+    allOption.value = "all";
+    allOption.textContent = "All organizations";
+    organizationSelect.appendChild(allOption);
+
+    options.forEach(option => {
+        const opt = document.createElement("option");
+        opt.value = option.value;
+        opt.textContent = option.label;
+        organizationSelect.appendChild(opt);
+    });
+
+    organizationSelect.disabled = options.length === 0;
+    organizationSelect.value = selectedOrganizationId === "all" ? "all" : selectedOrganizationId;
 }
 
 function clearElement(el) {
@@ -326,6 +387,7 @@ function getUrlState() {
     const search = normalizeString(params.get("q"));
     const category = normalizeFilterValue(params.get("c"));
     const subcategory = normalizeFilterValue(params.get("s"));
+    const organization = normalizeOrganizationFilterValue(params.get("o"));
     const selectedId = normalizeString(params.get("id"));
     const view = normalizeFilterValue(params.get("view")) === "map" ? "map" : "details";
     const scope = normalizeFilterValue(params.get("scope")) === "results" ? "results" : "selected";
@@ -333,6 +395,7 @@ function getUrlState() {
         search,
         category,
         subcategory: category === "all" ? "all" : subcategory,
+        organization,
         selectedId,
         view,
         scope
@@ -346,6 +409,7 @@ function updateUrlState() {
     if (activeFilters.subcategory !== "all" && activeFilters.category !== "all") {
         params.set("s", activeFilters.subcategory);
     }
+    if (activeFilters.organization !== "all") params.set("o", activeFilters.organization);
     if (selectedResourceId) params.set("id", selectedResourceId);
     if (activeRightPanel === "map") params.set("view", "map");
     if (activeMapScope === "results") params.set("scope", "results");
@@ -1306,14 +1370,29 @@ function resetSubcategoryFilter(disabled = true) {
     subcategorySelect.disabled = disabled;
 }
 
+function filterResourcesForOrganization(resources, organizationId) {
+    const normalizedOrganizationId = normalizeOrganizationFilterValue(organizationId);
+    if (normalizedOrganizationId === "all") {
+        return Array.isArray(resources) ? resources.slice() : [];
+    }
+
+    return (Array.isArray(resources) ? resources : []).filter(resource =>
+        normalizeString(resource?.organizationId) === normalizedOrganizationId
+    );
+}
+
 function resetAll() {
     searchInput.value = "";
     categorySelect.value = "all";
     resetSubcategoryFilter(true);
+    if (organizationSelect) {
+        organizationSelect.value = "all";
+    }
     activeFilters = {
         search: "",
         category: "all",
-        subcategory: "all"
+        subcategory: "all",
+        organization: "all"
     };
     selectedResourceId = null;
     activeMapScope = "selected";
@@ -1359,11 +1438,13 @@ async function applyFilters(options = {}) {
     const nextSubcategory = nextCategory === "all"
         ? "all"
         : normalizeFilterValue(subcategorySelect.value);
+    const nextOrganization = normalizeOrganizationFilterValue(organizationSelect?.value);
 
     activeFilters = {
         search: nextSearch,
         category: nextCategory,
-        subcategory: nextSubcategory
+        subcategory: nextSubcategory,
+        organization: nextOrganization
     };
 
     const requestId = ++latestLoadRequestId;
@@ -1385,9 +1466,14 @@ async function applyFilters(options = {}) {
     }
 
     globalData = Array.isArray(resources) ? resources.filter(isResourcePublished) : [];
-    const filteredData = filterResourcesForSearch(globalData, nextSearch);
-    sortByOrganizationInPlace(filteredData);
-    renderResults(filteredData);
+    const searchFilteredData = filterResourcesForSearch(globalData, nextSearch);
+    const organizationFilteredData = filterResourcesForOrganization(searchFilteredData, nextOrganization);
+    populateOrganizationFilter(
+        nextOrganization === "all" ? searchFilteredData : organizationFilteredData,
+        nextOrganization
+    );
+    sortByOrganizationInPlace(organizationFilteredData);
+    renderResults(organizationFilteredData);
     updateUrlState();
 }
 
@@ -1441,14 +1527,17 @@ async function init() {
     categorySelect.value = initialState.category;
     populateSubcategoryFilterForCategory(initialState.category);
     subcategorySelect.value = initialState.category === "all" ? "all" : initialState.subcategory;
+    populateOrganizationFilter(globalData, initialState.organization);
     searchInput.value = initialState.search;
+    organizationSelect.value = initialState.organization;
     selectedResourceId = initialState.selectedId;
     activeRightPanel = initialState.view;
     activeMapScope = initialState.scope;
     activeFilters = {
         search: initialState.search,
         category: initialState.category,
-        subcategory: initialState.category === "all" ? "all" : initialState.subcategory
+        subcategory: initialState.category === "all" ? "all" : initialState.subcategory,
+        organization: initialState.organization
     };
 
     await applyFilters();
@@ -1478,6 +1567,11 @@ categorySelect.addEventListener("change", () => {
 subcategorySelect.addEventListener("change", () => {
     selectedResourceId = null;
     void applyFilters({ forceReload: true });
+});
+
+organizationSelect?.addEventListener("change", () => {
+    selectedResourceId = null;
+    void applyFilters();
 });
 
 resetButton.addEventListener("click", resetAll);
@@ -1522,13 +1616,16 @@ window.addEventListener("popstate", () => {
     categorySelect.value = nextState.category;
     populateSubcategoryFilterForCategory(nextState.category);
     subcategorySelect.value = nextState.category === "all" ? "all" : nextState.subcategory;
+    populateOrganizationFilter(globalData, nextState.organization);
+    organizationSelect.value = nextState.organization;
     selectedResourceId = nextState.selectedId;
     activeRightPanel = nextState.view;
     activeMapScope = nextState.scope;
     activeFilters = {
         search: nextState.search,
         category: nextState.category,
-        subcategory: nextState.category === "all" ? "all" : nextState.subcategory
+        subcategory: nextState.category === "all" ? "all" : nextState.subcategory,
+        organization: nextState.organization
     };
     void applyFilters();
 });
