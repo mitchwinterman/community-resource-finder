@@ -423,6 +423,15 @@ function updateUrlState() {
     }, "", nextUrl);
 }
 
+function pushCurrentUrlState() {
+    window.history.pushState({
+        ...activeFilters,
+        selectedId: selectedResourceId,
+        view: activeRightPanel,
+        scope: activeMapScope
+    }, "", window.location.href);
+}
+
 function getPlainText(value) {
     const raw = String(value ?? "");
     if (!raw) return "";
@@ -995,6 +1004,39 @@ function appendDetailFieldTo(container, label, value, options = {}) {
     return true;
 }
 
+function appendParentOrganizationFilterFieldTo(container, resource) {
+    if (!container) return false;
+
+    const organizationId = normalizeString(resource?.organizationId);
+    const organizationName = getParentOrganizationName(resource);
+    if (!organizationId || !organizationName) {
+        return false;
+    }
+
+    const field = document.createElement("div");
+    field.className = "details-field";
+
+    const labelEl = document.createElement("div");
+    labelEl.className = "details-label";
+    labelEl.textContent = "Parent Organization";
+    field.appendChild(labelEl);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "details-parent-organization-btn";
+    button.textContent = organizationName;
+    button.addEventListener("click", () => {
+        focusOrganizationFilter({
+            organizationId,
+            resourceId: normalizeString(resource?.id)
+        });
+    });
+    field.appendChild(button);
+
+    container.appendChild(field);
+    return true;
+}
+
 function appendDetailListFieldTo(container, label, values, options = {}) {
     if (!container) return false;
 
@@ -1139,6 +1181,30 @@ function createCopyAddressButton(address) {
     return button;
 }
 
+function focusOrganizationFilter({ organizationId = "", resourceId = "" } = {}) {
+    const normalizedOrganizationId = normalizeOrganizationFilterValue(organizationId);
+    if (!organizationSelect || normalizedOrganizationId === "all") return;
+
+    pushCurrentUrlState();
+
+    searchInput.value = "";
+    categorySelect.value = "all";
+    resetSubcategoryFilter(true);
+    organizationSelect.value = normalizedOrganizationId;
+
+    activeFilters = {
+        search: "",
+        category: "all",
+        subcategory: "all",
+        organization: normalizedOrganizationId
+    };
+    selectedResourceId = normalizeString(resourceId);
+    activeRightPanel = "details";
+    activeMapScope = "selected";
+
+    void applyFilters({ forceReload: true });
+}
+
 function sortByOrganizationInPlace(list) {
     list.sort((a, b) => {
         const nameA = getResourceTitle(a).toLowerCase();
@@ -1231,9 +1297,7 @@ function showDetails(resource, options = {}) {
     titleBlock.appendChild(
         createTextBlock("div", "details-title", getResourceTitle(resource) || "No name")
     );
-    appendDetailFieldTo(titleBlock, "Parent Organization", getParentOrganizationName(resource), {
-        valueClassName: "details-parent-organization"
-    });
+    appendParentOrganizationFilterFieldTo(titleBlock, resource);
     appendChipGroupTo(titleBlock, "Categories", resource.Categories);
     rightPanelContent.appendChild(titleBlock);
 

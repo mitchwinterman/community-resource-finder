@@ -417,6 +417,7 @@ select:focus {
 .reset-btn:focus-visible,
 .header-action-btn:focus-visible,
 .header-action-link:focus-visible,
+.details-parent-organization-btn:focus-visible,
 .details-action-btn:focus-visible,
 .footer-right a:focus-visible,
 .brand-home-link:focus-visible,
@@ -465,6 +466,23 @@ input[type="text"]:focus-visible {
     font-size: 15px;
     line-height: 1.5;
     color: #334155;
+}
+
+.details-parent-organization-btn {
+    border: none;
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    color: #0f172a;
+    font-size: 15px;
+    line-height: 1.5;
+    text-align: left;
+    cursor: pointer;
+}
+
+.details-parent-organization-btn:hover {
+    color: #1d4ed8;
+    text-decoration: underline;
 }
 
 .details-priority-grid {
