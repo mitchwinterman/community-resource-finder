@@ -242,6 +242,8 @@ let reviewStatusMeta = [];
 let activeReviewFilter = "due";
 let activeReviewOrganizationFilter = "";
 let resourceSaveStatusTimer = null;
+let resourceEditorSnapshot = "";
+let organizationEditorSnapshot = "";
 
 const quillEditors = new Map();
 const quillToolbarOptions = [
@@ -309,6 +311,10 @@ function show(el) {
 
 function hide(el) {
   el?.classList.add("hidden");
+}
+
+function isShown(el) {
+  return Boolean(el) && !el.classList.contains("hidden");
 }
 
 function clearResourceSaveStatus() {
@@ -1060,8 +1066,9 @@ function refreshOrganizationMembershipSection() {
   renderMembershipList(getMembershipsForOrganization(editingOrganizationId));
 }
 
-function openOwnedOrganizationResource(resource) {
+async function openOwnedOrganizationResource(resource) {
   if (!resource?.id) return;
+  if (!await confirmEditorExitIfNeeded()) return;
   setActivePanel("resources");
   openResourceEditor(resource.id, resource);
   renderResourceList(resourceMeta);
@@ -1206,6 +1213,58 @@ function normalizeRequestComparableValue(value) {
   }
 
   return normalizeString(value);
+}
+
+function captureResourceEditorSnapshot() {
+  resourceEditorSnapshot = normalizeRequestComparableValue(collectResourcePayload());
+}
+
+function captureOrganizationEditorSnapshot() {
+  organizationEditorSnapshot = normalizeRequestComparableValue(collectOrganizationPayload());
+}
+
+function hasUnsavedResourceChanges() {
+  return isShown(resourceEditor)
+    && normalizeRequestComparableValue(collectResourcePayload()) !== resourceEditorSnapshot;
+}
+
+function hasUnsavedOrganizationChanges() {
+  return isShown(organizationEditor)
+    && normalizeRequestComparableValue(collectOrganizationPayload()) !== organizationEditorSnapshot;
+}
+
+async function confirmDiscardOrSaveEditorChanges(kind) {
+  const normalizedKind = kind === "organization" ? "organization" : "resource";
+  const hasUnsavedChanges = normalizedKind === "organization"
+    ? hasUnsavedOrganizationChanges()
+    : hasUnsavedResourceChanges();
+
+  if (!hasUnsavedChanges) {
+    return true;
+  }
+
+  const shouldSave = window.confirm(
+    `You have unsaved changes to this ${normalizedKind}. Click OK to save them, or Cancel to choose whether to discard them.`
+  );
+  if (shouldSave) {
+    return normalizedKind === "organization"
+      ? await saveOrganizationChanges()
+      : await saveResourceChanges();
+  }
+
+  return window.confirm(`Discard unsaved changes to this ${normalizedKind}?`);
+}
+
+async function confirmEditorExitIfNeeded() {
+  if (isShown(resourceEditor) && !await confirmDiscardOrSaveEditorChanges("resource")) {
+    return false;
+  }
+
+  if (isShown(organizationEditor) && !await confirmDiscardOrSaveEditorChanges("organization")) {
+    return false;
+  }
+
+  return true;
 }
 
 function getRequestChangeKind(currentValue, proposedValue) {
@@ -1761,11 +1820,19 @@ function initNav() {
   }
 
   navButtons.forEach(btn => {
-    btn.addEventListener("click", () => setActivePanel(btn.dataset.panel));
+    btn.addEventListener("click", () => {
+      void attemptSetActivePanel(btn.dataset.panel);
+    });
   });
 
   navInitialized = true;
   setActivePanel("resources");
+}
+
+async function attemptSetActivePanel(panelName) {
+  if (panelName === activePanelName) return;
+  if (!await confirmEditorExitIfNeeded()) return;
+  setActivePanel(panelName);
 }
 
 function setActivePanel(panelName) {
@@ -1833,6 +1900,7 @@ async function loadResources(options = {}) {
     hide(resourceEditor);
     editingResourceId = null;
     editingResourceData = null;
+    resourceEditorSnapshot = "";
   }
 
   resourceList.textContent = "Loading...";
@@ -1860,6 +1928,7 @@ async function loadResources(options = {}) {
         hide(resourceEditor);
         editingResourceId = null;
         editingResourceData = null;
+        resourceEditorSnapshot = "";
       }
     }
 
@@ -1906,9 +1975,16 @@ function renderResourceList(resources) {
       className: "list-row-meta",
       text: statusParts.join(" | ")
     }));
-    row.addEventListener("click", () => openResourceEditor(r.id, r));
+    row.addEventListener("click", () => {
+      void openResourceEditorWithPrompt(r.id, r);
+    });
     resourceList.appendChild(row);
   });
+}
+
+async function openResourceEditorWithPrompt(docId, data) {
+  if (!await confirmEditorExitIfNeeded()) return;
+  openResourceEditor(docId, data);
 }
 
 function openResourceEditor(docId, data) {
@@ -1917,23 +1993,37 @@ function openResourceEditor(docId, data) {
   editingResourceData = data ? { ...data } : {};
   editorTitle.textContent = "Edit Resource";
   buildResourceForm(data || {});
+  captureResourceEditorSnapshot();
   show(resourceEditor);
 }
 
 addResourceBtn?.addEventListener("click", () => {
+  void openNewResourceEditorWithPrompt();
+});
+
+async function openNewResourceEditorWithPrompt() {
+  if (!await confirmEditorExitIfNeeded()) return;
   clearResourceSaveStatus();
   editingResourceId = null;
   editingResourceData = {};
   editorTitle.textContent = "Add New Resource";
   buildResourceForm({});
+  captureResourceEditorSnapshot();
   show(resourceEditor);
-});
+}
 
 cancelResourceBtn?.addEventListener("click", () => {
+  void cancelResourceEditorWithPrompt();
+});
+
+async function cancelResourceEditorWithPrompt() {
+  if (!await confirmDiscardOrSaveEditorChanges("resource")) return;
   clearResourceSaveStatus();
   hide(resourceEditor);
   editingResourceData = null;
-});
+  editingResourceId = null;
+  resourceEditorSnapshot = "";
+}
 
 // ------------------------------------------------------
 // Resource Form Fields
@@ -2535,11 +2625,11 @@ function collectResourcePayload() {
   return payload;
 }
 
-saveResourceBtn?.addEventListener("click", async () => {
+async function saveResourceChanges() {
   const orgInput = resourceForm.querySelector('.field-group[data-field="resourceTitle"] input');
   if (orgInput && typeof orgInput.checkValidity === "function" && !orgInput.checkValidity()) {
     orgInput.reportValidity?.();
-    return;
+    return false;
   }
 
   const payload = collectResourcePayload();
@@ -2558,7 +2648,7 @@ saveResourceBtn?.addEventListener("click", async () => {
 
   if (payload.organizationId && !getOrganizationNameById(payload.organizationId)) {
     alert("Selected owning organization no longer exists. Reload the page and try again.");
-    return;
+    return false;
   }
 
   if (isNew) {
@@ -2636,10 +2726,16 @@ saveResourceBtn?.addEventListener("click", async () => {
     showResourceSaveStatus(isNew ? "Resource created" : "Resource saved");
     await loadReviewStatus({ preserveEditor: true });
     await loadAuditLogs();
+    return true;
   } catch (err) {
     console.error("Error saving resource:", err);
     alert("Error saving resource. See console for details.");
+    return false;
   }
+}
+
+saveResourceBtn?.addEventListener("click", async () => {
+  await saveResourceChanges();
 });
 
 deleteResourceBtn?.addEventListener("click", async () => {
@@ -2719,6 +2815,7 @@ async function loadOrganizations(options = {}) {
       } else {
         hide(organizationEditor);
         editingOrganizationId = null;
+        organizationEditorSnapshot = "";
       }
     }
 
@@ -2747,9 +2844,16 @@ function renderOrganizationList(orgs) {
     });
     row.appendChild(createEl("div", { className: "list-row-title", text: getOrganizationDisplayName(org) }));
     row.appendChild(createEl("div", { className: "list-row-meta", text: getOrganizationSummary(org) }));
-    row.addEventListener("click", () => openOrganizationEditor(org));
+    row.addEventListener("click", () => {
+      void openOrganizationEditorWithPrompt(org);
+    });
     organizationList.appendChild(row);
   });
+}
+
+async function openOrganizationEditorWithPrompt(org) {
+  if (!await confirmEditorExitIfNeeded()) return;
+  openOrganizationEditor(org);
 }
 
 function openOrganizationEditor(org) {
@@ -2772,6 +2876,7 @@ function openOrganizationEditor(org) {
   editingInviteId = null;
   inviteEmailInput.disabled = false;
   refreshOrganizationInviteSection();
+  captureOrganizationEditorSnapshot();
   show(organizationEditor);
 }
 
@@ -2787,12 +2892,18 @@ function collectOrganizationPayload() {
 }
 
 addOrganizationBtn?.addEventListener("click", () => {
-  openOrganizationEditor(null);
+  void openOrganizationEditorWithPrompt(null);
 });
 
 cancelOrganizationBtn?.addEventListener("click", () => {
+  void cancelOrganizationEditorWithPrompt();
+});
+
+async function cancelOrganizationEditorWithPrompt() {
+  if (!await confirmDiscardOrSaveEditorChanges("organization")) return;
   hide(organizationEditor);
   editingOrganizationId = null;
+  organizationEditorSnapshot = "";
   refreshOrganizationOwnedResourceSection();
   hide(membershipEditor);
   editingMembershipId = null;
@@ -2802,13 +2913,13 @@ cancelOrganizationBtn?.addEventListener("click", () => {
   editingInviteId = null;
   inviteEmailInput.disabled = false;
   refreshOrganizationInviteSection();
-});
+}
 
-saveOrganizationBtn?.addEventListener("click", async () => {
+async function saveOrganizationChanges() {
   const payload = collectOrganizationPayload();
   if (!payload.name) {
     alert("Organization name is required.");
-    return;
+    return false;
   }
 
   const actor = getCurrentActorMetadata();
@@ -2819,7 +2930,7 @@ saveOrganizationBtn?.addEventListener("click", async () => {
 
   if (duplicate) {
     alert(`An organization named "${duplicate.name}" already exists.`);
-    return;
+    return false;
   }
 
   payload.updatedAt = serverTimestamp();
@@ -2875,10 +2986,16 @@ saveOrganizationBtn?.addEventListener("click", async () => {
     await loadInvites();
     await loadReviewRequests();
     await loadAuditLogs();
+    return true;
   } catch (err) {
     console.error("Error saving organization:", err);
     alert("Error saving organization. See console for details.");
+    return false;
   }
+}
+
+saveOrganizationBtn?.addEventListener("click", async () => {
+  await saveOrganizationChanges();
 });
 
 deleteOrganizationBtn?.addEventListener("click", async () => {
@@ -4488,20 +4605,22 @@ async function deleteSelectedMailItems() {
   }
 }
 
-function openMailSourceRequest() {
+async function openMailSourceRequest() {
   if (!editingMailId) return;
   const mailDoc = mailMeta.find(item => item.id === editingMailId);
   const requestDoc = getMailSourceRequest(mailDoc);
   if (!requestDoc) return;
+  if (!await confirmEditorExitIfNeeded()) return;
   setActivePanel("requests");
   openRequestEditor(requestDoc);
 }
 
-function openMailSourceResource() {
+async function openMailSourceResource() {
   if (!editingMailId) return;
   const mailDoc = mailMeta.find(item => item.id === editingMailId);
   const resourceDoc = getMailSourceResource(mailDoc);
   if (!resourceDoc) return;
+  if (!await confirmEditorExitIfNeeded()) return;
   setActivePanel("resources");
   openResourceEditor(resourceDoc.id, resourceDoc);
 }
@@ -4897,12 +5016,17 @@ sendReviewReminderBtn?.addEventListener("click", async () => {
 });
 
 openReviewResourceBtn?.addEventListener("click", () => {
+  void openReviewResourceFromStatus();
+});
+
+async function openReviewResourceFromStatus() {
   if (!editingReviewStatusId) return;
   const item = reviewStatusMeta.find(entry => entry.id === editingReviewStatusId);
   if (!item?.resource) return;
+  if (!await confirmEditorExitIfNeeded()) return;
   setActivePanel("resources");
   openResourceEditor(item.resource.id, item.resource);
-});
+}
 
 closeReviewStatusBtn?.addEventListener("click", () => {
   hide(reviewStatusEditor);
