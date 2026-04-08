@@ -1992,6 +1992,9 @@ function openResourceEditor(docId, data) {
   editingResourceId = docId;
   editingResourceData = data ? { ...data } : {};
   editorTitle.textContent = "Edit Resource";
+  if (Array.isArray(resourceMeta) && resourceMeta.length) {
+    renderResourceList(resourceMeta);
+  }
   buildResourceForm(data || {});
   captureResourceEditorSnapshot();
   show(resourceEditor);
@@ -2007,6 +2010,9 @@ async function openNewResourceEditorWithPrompt() {
   editingResourceId = null;
   editingResourceData = {};
   editorTitle.textContent = "Add New Resource";
+  if (Array.isArray(resourceMeta) && resourceMeta.length) {
+    renderResourceList(resourceMeta);
+  }
   buildResourceForm({});
   captureResourceEditorSnapshot();
   show(resourceEditor);
@@ -2023,6 +2029,9 @@ async function cancelResourceEditorWithPrompt() {
   editingResourceData = null;
   editingResourceId = null;
   resourceEditorSnapshot = "";
+  if (Array.isArray(resourceMeta) && resourceMeta.length) {
+    renderResourceList(resourceMeta);
+  }
 }
 
 // ------------------------------------------------------
