@@ -1893,7 +1893,8 @@ function getResourceDisplayName(resource) {
 async function loadResources(options = {}) {
   const {
     preserveEditorId = null,
-    preserveScrollTop = null
+    preserveScrollTop = null,
+    preserveOnlyIfEditingResourceId = null
   } = options;
 
   if (!preserveEditorId) {
@@ -1920,7 +1921,10 @@ async function loadResources(options = {}) {
     renderResourceList(resources);
     refreshOrganizationOwnedResourceSection();
 
-    if (preserveEditorId) {
+    const shouldPreserveEditor = preserveEditorId
+      && (!preserveOnlyIfEditingResourceId || editingResourceId === preserveOnlyIfEditingResourceId);
+
+    if (shouldPreserveEditor) {
       const refreshedResource = resources.find(item => item.id === preserveEditorId);
       if (refreshedResource) {
         openResourceEditor(refreshedResource.id, refreshedResource);
@@ -2693,6 +2697,7 @@ async function saveResourceChanges() {
 
   try {
     const preserveScrollTop = resourceList?.scrollTop ?? 0;
+    const saveTargetResourceId = editingResourceId;
     let savedResourceId = editingResourceId;
 
     if (editingResourceId) {
@@ -2730,7 +2735,8 @@ async function saveResourceChanges() {
     }
     await loadResources({
       preserveEditorId: savedResourceId,
-      preserveScrollTop
+      preserveScrollTop,
+      preserveOnlyIfEditingResourceId: saveTargetResourceId
     });
     showResourceSaveStatus(isNew ? "Resource created" : "Resource saved");
     await loadReviewStatus({ preserveEditor: true });
