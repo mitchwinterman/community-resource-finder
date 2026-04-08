@@ -72,6 +72,7 @@ const resourceSaveStatus = document.getElementById("resource-save-status");
 
 const addResourceBtn = document.getElementById("add-resource-btn");
 const saveResourceBtn = document.getElementById("save-resource-btn");
+const duplicateResourceBtn = document.getElementById("duplicate-resource-btn");
 const deleteResourceBtn = document.getElementById("delete-resource-btn");
 const cancelResourceBtn = document.getElementById("cancel-resource-btn");
 
@@ -1890,6 +1891,27 @@ function getResourceDisplayName(resource) {
   return getResourceTitle(resource) || "(Unnamed)";
 }
 
+function getUniqueDuplicatedResourceTitle(sourceTitle) {
+  const normalizedSourceTitle = normalizeString(sourceTitle) || "Untitled Resource";
+  const existingTitles = new Set(
+    resourceMeta
+      .map(resource => getResourceDisplayName(resource).toLowerCase())
+      .filter(Boolean)
+  );
+
+  const baseCopyTitle = `${normalizedSourceTitle} (Copy)`;
+  if (!existingTitles.has(baseCopyTitle.toLowerCase())) {
+    return baseCopyTitle;
+  }
+
+  let suffix = 2;
+  while (existingTitles.has(`${normalizedSourceTitle} (Copy ${suffix})`.toLowerCase())) {
+    suffix += 1;
+  }
+
+  return `${normalizedSourceTitle} (Copy ${suffix})`;
+}
+
 async function loadResources(options = {}) {
   const {
     preserveEditorId = null,
@@ -1984,6 +2006,8 @@ function renderResourceList(resources) {
     });
     resourceList.appendChild(row);
   });
+
+  syncSelectedResourceListRow();
 }
 
 async function openResourceEditorWithPrompt(docId, data) {
@@ -1991,14 +2015,28 @@ async function openResourceEditorWithPrompt(docId, data) {
   openResourceEditor(docId, data);
 }
 
+function syncSelectedResourceListRow() {
+  if (!resourceList) return;
+
+  const selectedId = normalizeString(editingResourceId);
+  const rows = Array.from(resourceList.querySelectorAll("[data-resource-id]"));
+  rows.forEach(row => {
+    row.classList.toggle("selected", normalizeString(row.dataset.resourceId) === selectedId && Boolean(selectedId));
+  });
+}
+
 function openResourceEditor(docId, data) {
   clearResourceSaveStatus();
   editingResourceId = docId;
   editingResourceData = data ? { ...data } : {};
   editorTitle.textContent = "Edit Resource";
+  if (duplicateResourceBtn) {
+    duplicateResourceBtn.disabled = false;
+  }
   if (Array.isArray(resourceMeta) && resourceMeta.length) {
     renderResourceList(resourceMeta);
   }
+  syncSelectedResourceListRow();
   buildResourceForm(data || {});
   captureResourceEditorSnapshot();
   show(resourceEditor);
@@ -2014,9 +2052,13 @@ async function openNewResourceEditorWithPrompt() {
   editingResourceId = null;
   editingResourceData = {};
   editorTitle.textContent = "Add New Resource";
+  if (duplicateResourceBtn) {
+    duplicateResourceBtn.disabled = true;
+  }
   if (Array.isArray(resourceMeta) && resourceMeta.length) {
     renderResourceList(resourceMeta);
   }
+  syncSelectedResourceListRow();
   buildResourceForm({});
   captureResourceEditorSnapshot();
   show(resourceEditor);
@@ -2036,6 +2078,33 @@ async function cancelResourceEditorWithPrompt() {
   if (Array.isArray(resourceMeta) && resourceMeta.length) {
     renderResourceList(resourceMeta);
   }
+  syncSelectedResourceListRow();
+}
+
+duplicateResourceBtn?.addEventListener("click", () => {
+  duplicateCurrentResourceIntoNewDraft();
+});
+
+function duplicateCurrentResourceIntoNewDraft() {
+  if (!isShown(resourceEditor)) return;
+
+  const payload = collectResourcePayload();
+  payload.resourceTitle = getUniqueDuplicatedResourceTitle(getResourceTitle(payload));
+
+  clearResourceSaveStatus();
+  editingResourceId = null;
+  editingResourceData = {};
+  editorTitle.textContent = "Duplicate Resource";
+  if (duplicateResourceBtn) {
+    duplicateResourceBtn.disabled = true;
+  }
+  if (Array.isArray(resourceMeta) && resourceMeta.length) {
+    renderResourceList(resourceMeta);
+  }
+  syncSelectedResourceListRow();
+  buildResourceForm(payload);
+  captureResourceEditorSnapshot();
+  show(resourceEditor);
 }
 
 // ------------------------------------------------------
@@ -2658,6 +2727,16 @@ async function saveResourceChanges() {
   payload.updatedAt = serverTimestamp();
   payload.updatedByUid = actor.uid;
   payload.updatedByEmail = actor.email;
+
+  const normalizedTargetTitle = getResourceDisplayName(payload).toLowerCase();
+  const duplicateResource = resourceMeta.find(resource =>
+    normalizeString(resource.id) !== normalizeString(editingResourceId)
+    && getResourceDisplayName(resource).toLowerCase() === normalizedTargetTitle
+  );
+  if (duplicateResource) {
+    alert(`A resource named "${getResourceDisplayName(duplicateResource)}" already exists.`);
+    return false;
+  }
 
   if (payload.organizationId && !getOrganizationNameById(payload.organizationId)) {
     alert("Selected owning organization no longer exists. Reload the page and try again.");
