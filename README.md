@@ -2,7 +2,7 @@
 
 Community Resource Finder is a Firebase-backed directory for browsing community services, filtering them by category and subcategory, and maintaining the directory through a browser-based admin panel.
 
-This repository currently contains the public site, the admin interface, the Firebase client configuration, shared normalization rules for taxonomy and contact fields, Firestore security rules, a one-time admin-claim setup script, a local Outlook mail worker, and legacy JSON source files from the original Firestore seed process.
+This repository currently contains the public site, the admin interface, the organization portal, the quarterly review page, the Firebase client configuration, shared normalization rules for taxonomy and contact fields, Firestore security rules, a one-time admin-claim setup script, a local Outlook mail worker, and a Playwright smoke-test harness.
 
 ## What This Project Does
 
@@ -18,9 +18,12 @@ The project is implemented as a small static frontend application. There is no b
 ## Current Stack
 
 - Plain HTML, CSS, and JavaScript
+- Leaflet for map rendering in the public app
+- Quill + DOMPurify for admin/org rich-text editing flows
 - Firebase Authentication
 - Cloud Firestore
 - Firebase JavaScript SDK loaded from Google CDN
+- Playwright smoke tests for browser and responsive regression checks
 - Static assets hosted directly from the repository output
 
 ## Repository Contents
@@ -38,6 +41,7 @@ Top-level files:
 - `org.html`: organization login and submission portal
 - `firestore.rules`: Cloud Firestore security rules for public reads and admin-only writes
 - `package.json`: Node tooling for one-time Firebase Admin scripts
+- `playwright.config.js`: Playwright smoke-test configuration for local browser coverage
 - `assets/css/styles.css`: shared public-facing styling
 - `assets/css/admin.css`: admin and portal styling
 - `assets/js/app.js`: public application logic, Firestore reads, filtering, and details rendering
@@ -57,6 +61,9 @@ Top-level files:
 - `tools/send_outlook_mail.ps1`: Outlook COM bridge used by the mail worker on Windows
 - `tools/run_mail_worker.ps1`: scheduler-friendly wrapper that sets env vars and launches the Outlook mail worker
 - `tools/coordinate_backfill.mjs`: one-time coordinate backfill script for previewing and writing `Latitude` / `Longitude` on existing resources
+- `tools/static-server.mjs`: simple local static server used by the smoke-test harness
+- `tests/smoke/`: Playwright smoke tests for public pages, auth flows, admin, org, and review flows
+- `docs/smoke-test-plan.md`: smoke-test matrix, environment notes, and follow-up testing guidance
 
 ## High-Level Architecture
 
@@ -73,6 +80,7 @@ At startup it:
 5. Builds the category and subcategory filter dropdowns.
 6. Filters all loaded records client-side in the browser.
 7. Renders a result list on the left and resource details on the right.
+8. Stores public UI state such as filters, selected resource, and map/detail mode in the URL so browser history and direct links reflect the current view.
 
 ### Admin App
 
@@ -548,11 +556,17 @@ The frontend still hides or shows the admin UI based on the user's token claims,
 You need:
 
 - a web browser
-- internet access to load the Firebase CDN modules and Google Fonts
+- internet access to load the Firebase CDN modules and third-party CDN assets such as Google Fonts, Leaflet, Quill, and DOMPurify
 - access to the configured Firebase project if you want the live app and admin tools to work
 - Node.js if you want to run local helper scripts such as the admin-claim setup script
 
 Node.js is not required to run the site itself, but it is required for scripts in `tools/`.
+
+If you want to run the smoke-test harness locally, you also need:
+
+- `npm.cmd install` to install `@playwright/test`
+- local browser installations for Chrome and/or Edge if you want to reuse system browsers
+- Playwright-managed browser binaries if you want full Playwright Firefox/WebKit coverage
 
 ### Why You Should Use a Local Web Server
 
@@ -579,6 +593,34 @@ Then open:
 
 If you use VS Code with Live Server, you can also serve the folder that way.
 
+### Smoke Tests
+
+The repo now includes a Playwright smoke-test harness that runs the public app, static pages, auth flows, admin shell, org shell, and quarterly review flow against deterministic mocked Firebase/CDN dependencies.
+
+Install dependencies:
+
+```powershell
+npm.cmd install
+```
+
+Run the smoke suite:
+
+```powershell
+npm.cmd run smoke:test
+```
+
+Run it headed:
+
+```powershell
+npm.cmd run smoke:test:headed
+```
+
+Notes:
+
+- the smoke harness starts its own local static server through `tools/static-server.mjs`
+- in the current local setup, the suite has been validated against Chrome, Edge, tablet Chromium emulation, and mobile Chromium emulation
+- Firefox and WebKit coverage may require Playwright-managed browser binaries or additional environment work if local automation hooks are unavailable
+
 ### Expected Local Pages
 
 After starting a local server, these pages should be available:
@@ -588,6 +630,8 @@ After starting a local server, these pages should be available:
 - `/help.html`
 - `/contact.html`
 - `/login.html`
+- `/auth.html`
+- `/review.html`
 - `/admin.html`
 - `/org.html`
 
@@ -641,6 +685,15 @@ Clicking a result shows:
 - cost
 - last verified
 - notes
+
+The public UI also supports:
+
+- a details/map toggle for the selected resource
+- an all-results map mode when multiple filtered results are mappable
+- responsive master-detail behavior that collapses into a stacked mobile flow below `900px`
+- an intermediate tablet layout below `1200px` so the header and search controls reflow before the mobile breakpoint
+- mobile-only `Back to results` behavior that closes the selected resource and scrolls the user back to the search controls
+- browser history support for selected-resource state on mobile so Back returns to the list-only state instead of trapping the user in the details view
 
 ## Static Pages
 
@@ -830,7 +883,7 @@ Your hosting environment must:
 
 - serve static HTML, CSS, JS, JSON, and image files
 - allow browser access to Firebase CDN modules
-- allow browser access to Google Fonts, if those fonts are still desired
+- allow browser access to third-party CDN assets such as Google Fonts, Leaflet, Quill, and DOMPurify if those dependencies are still desired
 
 ### Common Deployment Pattern
 
@@ -942,7 +995,8 @@ Before pushing to production, verify:
 9. contact email targets are still correct
 10. branding assets and footer text are current
 11. the site works on mobile and desktop browsers
-12. the admin password is known and stored in an approved password manager
+12. the smoke suite passes in the supported local/browser environment
+13. the admin password is known and stored in an approved password manager
 
 ## Admin Claim Setup
 
@@ -1008,7 +1062,9 @@ Some files previously displayed mojibake characters such as smart punctuation re
 
 Current limitations in the repo as it stands:
 
-- no automated test suite
+- no full end-to-end integration test environment against a disposable Firebase backend or emulator
+- no automated WebKit/Safari coverage in the current local environment
+- no reliable automated Firefox coverage in the current local environment without additional Playwright/browser setup
 - no formal linting or formatting setup
 - no build process
 - no environment separation documented in the repo
@@ -1016,7 +1072,7 @@ Current limitations in the repo as it stands:
 - no deduplicating import flow
 - client-side filtering loads entire collections into the browser
 - contact form depends on `mailto:`
-- no external-org ownership or review workflow yet
+- no self-service public organization onboarding flow; staff still control access and review workflows through admin-managed records
 
 ## Troubleshooting
 
@@ -1062,7 +1118,8 @@ If you are actively maintaining this project, the highest-value follow-up work i
 
 1. publish and verify `firestore.rules` in the live Firebase project
 2. replace `mailto:` contact flow with a real submission backend
-3. complete Phase 2B by adding organization memberships, an org-user portal, and review-before-publish change requests
+3. improve automated browser coverage for Playwright Firefox/WebKit or document a formal manual fallback for those browsers
+4. continue hardening the organization editor lifecycle, invite flow, and review-before-publish workflow that was introduced in Phase 2
 
 The Phase 2 ownership and review design is documented in:
 
