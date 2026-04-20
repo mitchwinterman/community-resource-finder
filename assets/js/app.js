@@ -134,6 +134,7 @@ const resultsDiv = document.getElementById("results");
 const detailsDiv = document.getElementById("details");
 const rightPanelContent = document.getElementById("rightPanelContent");
 const detailsHeading = document.getElementById("details-heading");
+const mobileBackToResultsBtn = document.getElementById("mobileBackToResultsBtn");
 const detailsViewToggle = document.getElementById("detailsViewToggle");
 const mapViewToggle = document.getElementById("mapViewToggle");
 const selectedScopeToggle = document.getElementById("selectedScopeToggle");
@@ -162,6 +163,7 @@ const resourceQueryCache = new Map();
 const organizationNameById = new Map();
 const stackedLayoutMediaQuery = window.matchMedia("(max-width: 900px)");
 let resultsPanelHeightSyncQueued = false;
+let pendingMobileScrollTarget = null;
 
 // -----------------------------
 // HELPER FUNCTIONS
@@ -310,6 +312,44 @@ function clearElement(el) {
 function renderDetailsShell() {
     clearElement(rightPanelContent);
     updateRightPanelToggleUi();
+}
+
+function scheduleMobileScrollTarget(target) {
+    pendingMobileScrollTarget = target;
+}
+
+function scrollWindowToElement(element) {
+    if (!element) return;
+    const elementTop = element.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({
+        top: Math.max(0, elementTop - 12),
+        behavior: "smooth"
+    });
+}
+
+function flushPendingMobileScrollTarget() {
+    if (!stackedLayoutMediaQuery.matches || !pendingMobileScrollTarget) {
+        pendingMobileScrollTarget = null;
+        return;
+    }
+
+    const target = pendingMobileScrollTarget;
+    pendingMobileScrollTarget = null;
+
+    window.requestAnimationFrame(() => {
+        if (target?.type === "details") {
+            scrollWindowToElement(detailsDiv);
+            return;
+        }
+
+        if (target?.type === "filters") {
+            const scrollTarget = searchInput?.closest(".search-row") || searchInput || resultsPanel;
+            scrollWindowToElement(scrollTarget);
+            return;
+        }
+
+        scrollWindowToElement(resultsPanel);
+    });
 }
 
 function clearResultsPanelHeight() {
@@ -617,6 +657,11 @@ function updateRightPanelToggleUi() {
     resultsScopeToggle?.classList.toggle("active", !selectedScope);
     selectedScopeToggle?.setAttribute("aria-selected", selectedScope ? "true" : "false");
     resultsScopeToggle?.setAttribute("aria-selected", !selectedScope ? "true" : "false");
+    const showMobileBackButton = stackedLayoutMediaQuery.matches && selectedScope && Boolean(selectedResourceId);
+    mobileBackToResultsBtn?.classList.toggle("is-visible", showMobileBackButton);
+    if (mobileBackToResultsBtn) {
+        mobileBackToResultsBtn.hidden = !showMobileBackButton;
+    }
     if (detailsHeading) {
         if (!selectedScope) {
             detailsHeading.textContent = "All Results Map";
@@ -1271,6 +1316,18 @@ function renderResults(resources) {
 function showDetails(resource, options = {}) {
     const { focusDetails = true, updateHistory = true } = options;
     const resourceId = normalizeString(resource?.id);
+    const previousResourceId = normalizeString(selectedResourceId);
+    const shouldPushMobileHistory = (
+        stackedLayoutMediaQuery.matches &&
+        updateHistory &&
+        resourceId &&
+        !previousResourceId
+    );
+
+    if (shouldPushMobileHistory) {
+        pushCurrentUrlState();
+    }
+
     updateSelectedResultCardState(resourceId);
 
     selectedResourceId = resourceId;
@@ -1286,6 +1343,10 @@ function showDetails(resource, options = {}) {
         }
         if (focusDetails) {
             detailsDiv.focus();
+        }
+        if (stackedLayoutMediaQuery.matches && focusDetails) {
+            scheduleMobileScrollTarget({ type: "details" });
+            flushPendingMobileScrollTarget();
         }
         return;
     }
@@ -1380,6 +1441,27 @@ function showDetails(resource, options = {}) {
     if (focusDetails) {
         detailsDiv.focus();
     }
+    if (stackedLayoutMediaQuery.matches && focusDetails) {
+        scheduleMobileScrollTarget({ type: "details" });
+        flushPendingMobileScrollTarget();
+    }
+}
+
+function closeMobileDetailsView(options = {}) {
+    const { updateHistory = true } = options;
+
+    selectedResourceId = null;
+    activeRightPanel = "details";
+    activeMapScope = "selected";
+    updateSelectedResultCardState("");
+    if (stackedLayoutMediaQuery.matches) {
+        scheduleMobileScrollTarget({ type: "filters" });
+    }
+    refreshRightPanel({
+        focusPanel: false,
+        updateHistory
+    });
+    flushPendingMobileScrollTarget();
 }
 
 function showError(message) {
@@ -1539,6 +1621,7 @@ async function applyFilters(options = {}) {
     sortByOrganizationInPlace(organizationFilteredData);
     renderResults(organizationFilteredData);
     updateUrlState();
+    flushPendingMobileScrollTarget();
 }
 
 // -----------------------------
@@ -1674,7 +1757,14 @@ resultsScopeToggle?.addEventListener("click", () => {
     refreshRightPanel({ focusPanel: true, updateHistory: true });
 });
 
+mobileBackToResultsBtn?.addEventListener("click", () => {
+    closeMobileDetailsView({
+        updateHistory: true
+    });
+});
+
 window.addEventListener("popstate", () => {
+    const previousSelectedResourceId = normalizeString(selectedResourceId);
     const nextState = getUrlState();
     searchInput.value = nextState.search;
     categorySelect.value = nextState.category;
@@ -1691,14 +1781,23 @@ window.addEventListener("popstate", () => {
         subcategory: nextState.category === "all" ? "all" : nextState.subcategory,
         organization: nextState.organization
     };
+    if (stackedLayoutMediaQuery.matches && previousSelectedResourceId && !nextState.selectedId) {
+        scheduleMobileScrollTarget({ type: "filters" });
+    }
     void applyFilters();
 });
 
 window.addEventListener("resize", queueResultsPanelHeightSync);
 if (typeof stackedLayoutMediaQuery.addEventListener === "function") {
-    stackedLayoutMediaQuery.addEventListener("change", queueResultsPanelHeightSync);
+    stackedLayoutMediaQuery.addEventListener("change", () => {
+        updateRightPanelToggleUi();
+        queueResultsPanelHeightSync();
+    });
 } else if (typeof stackedLayoutMediaQuery.addListener === "function") {
-    stackedLayoutMediaQuery.addListener(queueResultsPanelHeightSync);
+    stackedLayoutMediaQuery.addListener(() => {
+        updateRightPanelToggleUi();
+        queueResultsPanelHeightSync();
+    });
 }
 
 if (typeof ResizeObserver === "function" && detailsDiv) {

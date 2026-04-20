@@ -1057,6 +1057,43 @@ body {
 .footer-separator { margin: 0 8px; color: #6b7280; }
 
 /* ------------------------------------------------------
+   TABLET
+------------------------------------------------------ */
+@media (max-width: 1200px) {
+  .screen {
+    padding: 24px 28px 24px;
+  }
+
+  .topbar {
+    grid-template-columns: auto 1fr;
+    row-gap: 14px;
+  }
+
+  .topbar-right {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .nav-btn {
+    margin-right: 0;
+  }
+
+  .admin-list {
+    width: 34%;
+  }
+
+  .field-phone-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------
    RESPONSIVE
 ------------------------------------------------------ */
 @media (max-width: 900px) {

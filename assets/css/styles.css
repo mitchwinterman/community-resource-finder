@@ -307,6 +307,39 @@ select:focus {
     margin-bottom: 8px;
 }
 
+.right-panel-heading-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.mobile-back-btn {
+    display: none;
+    align-self: flex-start;
+    border: 1px solid #bfdbfe;
+    border-radius: 999px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: 0.15s ease;
+}
+
+.mobile-back-btn:hover {
+    background: #dbeafe;
+    border-color: #93c5fd;
+}
+
+.mobile-back-btn.is-visible {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .right-panel-toggle {
     display: inline-flex;
     gap: 6px;
@@ -417,6 +450,7 @@ select:focus {
 .reset-btn:focus-visible,
 .header-action-btn:focus-visible,
 .header-action-link:focus-visible,
+.mobile-back-btn:focus-visible,
 .details-parent-organization-btn:focus-visible,
 .details-action-btn:focus-visible,
 .footer-right a:focus-visible,
@@ -856,6 +890,75 @@ input[type="text"]:focus-visible {
     font-size: 14px;
 }
 
+@media (max-width: 1200px) {
+    body {
+        padding: 24px;
+    }
+
+    .wrapper {
+        padding: 28px 28px 30px;
+        gap: 20px;
+    }
+
+    .app-header {
+        gap: 18px;
+    }
+
+    .brand-home {
+        gap: 18px;
+        padding: 18px 24px;
+    }
+
+    .logo-crf {
+        height: 110px;
+    }
+
+    .logo-wcls {
+        height: 84px;
+    }
+
+    h1 {
+        font-size: 30px;
+    }
+
+    .subtitle {
+        max-width: 100%;
+    }
+
+    .search-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .search-box,
+    .search-control-action {
+        grid-column: 1 / -1;
+    }
+
+    .search-control-action {
+        justify-content: flex-start;
+    }
+
+    .view-scope-bar {
+        justify-content: flex-start;
+    }
+
+    .results-panel {
+        width: 38%;
+    }
+
+    .leaflet-map-canvas {
+        min-height: 420px;
+    }
+
+    .contact-row {
+        flex-wrap: wrap;
+    }
+
+    .contact-row .field-group {
+        flex: 1 1 240px;
+    }
+}
+
 /* MOBILE */
 @media (max-width: 900px) {
     body {
@@ -891,8 +994,20 @@ input[type="text"]:focus-visible {
 
     .brand-home {
         width: 100%;
+        flex-direction: column;
         justify-content: center;
+        text-align: center;
         padding: 18px 20px;
+        gap: 14px;
+        border-radius: 28px;
+    }
+
+    .brand-text {
+        align-items: center;
+    }
+
+    .subtitle {
+        max-width: none;
     }
 
     .logo-wcls {
@@ -904,7 +1019,7 @@ input[type="text"]:focus-visible {
     }
 
     .search-row {
-        flex-direction: column;
+        grid-template-columns: 1fr;
     }
 
     .view-scope-bar {
@@ -937,6 +1052,10 @@ input[type="text"]:focus-visible {
         align-items: stretch;
     }
 
+    .right-panel-heading-group {
+        width: 100%;
+    }
+
     .right-panel-toggle {
         justify-content: space-between;
     }
@@ -944,6 +1063,10 @@ input[type="text"]:focus-visible {
     .right-panel-toggle-btn {
         flex: 1;
         text-align: center;
+    }
+
+    .mobile-back-btn.is-visible {
+        display: inline-flex;
     }
 
     .details-title {
