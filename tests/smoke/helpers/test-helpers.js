@@ -278,10 +278,14 @@ function createFirebaseFirestoreModule() {
 
     function matchesWhere(docValue, constraint) {
       if (!constraint || constraint.kind !== "where") return true;
-      if (constraint.op !== "==") {
-        throw new Error("Only equality where clauses are supported in smoke tests.");
+      if (constraint.op === "==") {
+        return String(docValue?.[constraint.field] ?? "") === String(constraint.value ?? "");
       }
-      return String(docValue?.[constraint.field] ?? "") === String(constraint.value ?? "");
+      if (constraint.op === "array-contains") {
+        const value = docValue?.[constraint.field];
+        return Array.isArray(value) && value.some(item => String(item ?? "") === String(constraint.value ?? ""));
+      }
+      throw new Error("Unsupported where clause in smoke tests.");
     }
 
     export function getFirestore(app) {

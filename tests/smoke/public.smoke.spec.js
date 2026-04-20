@@ -45,6 +45,7 @@ test("public directory supports core browse, filter, and map flows", async ({ pa
   await page.locator("#resultsScopeToggle").click();
   await expect(page.locator(".leaflet-map-canvas")).toBeVisible();
 
+  await page.locator("#selectedScopeToggle").click();
   await page.locator("#detailsViewToggle").click();
   await expect(page.locator(".details-card, .details-section").first()).toBeVisible();
 
