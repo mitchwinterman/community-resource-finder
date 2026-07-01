@@ -66,6 +66,17 @@ const panelRequests = document.getElementById("panel-requests");
 const panelMail = document.getElementById("panel-mail");
 const panelAudit = document.getElementById("panel-audit");
 
+if (OUTBOUND_MAIL_PAUSED) {
+  ensureMailPauseBanner(
+    panelReviewStatus,
+    "Scheduled and manual review reminders are off until CRF rollout. Due counts remain visible for internal review only."
+  );
+  ensureMailPauseBanner(
+    panelMail,
+    "New emails, reminders, retries, and editor invites are blocked in the admin UI until CRF rollout."
+  );
+}
+
 // Resources UI
 const resourceList = document.getElementById("resource-list");
 const resourceEditor = document.getElementById("resource-editor");
@@ -309,6 +320,38 @@ const requestReviewFieldConfig = [
 // ------------------------------------------------------
 // Helpers
 // ------------------------------------------------------
+function ensureMailPauseBanner(panel, message) {
+  if (!panel || panel.querySelector(".mail-pause-banner")) return;
+
+  const header = panel.querySelector(".panel-header");
+  const banner = document.createElement("div");
+  banner.className = "mail-pause-banner";
+  banner.setAttribute("role", "status");
+  banner.style.cssText = [
+    "margin: 0 0 14px",
+    "padding: 10px 12px",
+    "border: 1px solid #fed7aa",
+    "border-left: 5px solid #f97316",
+    "border-radius: 8px",
+    "background: #fff7ed",
+    "color: #7c2d12",
+    "font-size: 14px",
+    "line-height: 1.4"
+  ].join(";");
+
+  const label = document.createElement("strong");
+  label.textContent = "Outbound mail paused. ";
+  label.style.color = "#9a3412";
+  banner.appendChild(label);
+  banner.appendChild(document.createTextNode(message));
+
+  if (header?.parentNode) {
+    header.insertAdjacentElement("afterend", banner);
+  } else {
+    panel.prepend(banner);
+  }
+}
+
 function show(el) {
   el?.classList.remove("hidden");
 }
