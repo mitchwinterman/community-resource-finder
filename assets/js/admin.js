@@ -44,7 +44,7 @@ import {
 // ------------------------------------------------------
 const OUTBOUND_MAIL_PAUSED = true;
 const OUTBOUND_MAIL_PAUSE_MESSAGE = "Outbound mail is paused until CRF rollout. New emails, reminders, and editor invites will not be queued.";
-const ADMIN_BUILD_ID = "20260701-mail-paused";
+const ADMIN_BUILD_ID = "20260701-mail-paused-2";
 window.CRF_ADMIN_BUILD_ID = ADMIN_BUILD_ID;
 console.info(`CRF admin build: ${ADMIN_BUILD_ID}`);
 
