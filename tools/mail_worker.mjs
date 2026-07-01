@@ -26,6 +26,13 @@ const limit = (() => {
   const raw = Number.parseInt(args[limitArgIndex + 1] || "", 10);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_LIMIT;
 })();
+const mailWorkerEnabled = isTruthyEnv(process.env.CRF_MAIL_WORKER_ENABLED);
+const mailWorkerDisabled = isTruthyEnv(process.env.CRF_MAIL_WORKER_DISABLED);
+
+if (!mailWorkerEnabled || mailWorkerDisabled) {
+  console.log("CRF mail worker is disabled. Set CRF_MAIL_WORKER_ENABLED=1 and leave CRF_MAIL_WORKER_DISABLED unset or false to process outbound mail and worker actions.");
+  process.exit(0);
+}
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -69,6 +76,11 @@ const reviewRequestEditableFields = [
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isTruthyEnv(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
 }
 
 function normalizeBaseUrl(value) {

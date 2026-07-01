@@ -42,6 +42,9 @@ import {
 // ------------------------------------------------------
 // CONFIG
 // ------------------------------------------------------
+const OUTBOUND_MAIL_PAUSED = true;
+const OUTBOUND_MAIL_PAUSE_MESSAGE = "Outbound mail is paused until CRF rollout. New emails, reminders, and editor invites will not be queued.";
+
 // ------------------------------------------------------
 // DOM
 // ------------------------------------------------------
@@ -1130,8 +1133,10 @@ function refreshOrganizationInviteSection() {
     return;
   }
 
-  addInviteBtn.disabled = false;
-  inviteSectionHelper.textContent = "Invites create or link an editor account, then email a one-time password setup link.";
+  addInviteBtn.disabled = OUTBOUND_MAIL_PAUSED;
+  inviteSectionHelper.textContent = OUTBOUND_MAIL_PAUSED
+    ? OUTBOUND_MAIL_PAUSE_MESSAGE
+    : "Invites create or link an editor account, then email a one-time password setup link.";
   renderInviteList(getInvitesForOrganization(editingOrganizationId));
 }
 
@@ -3318,7 +3323,8 @@ function openInviteEditor(invite) {
   inviteEmailInput.disabled = Boolean(editingInviteId);
 
   const status = normalizeInviteStatus(invite?.status);
-  retryInviteBtn.disabled = !editingInviteId || !["failed", "revoked"].includes(status);
+  if (saveInviteBtn) saveInviteBtn.disabled = OUTBOUND_MAIL_PAUSED;
+  retryInviteBtn.disabled = OUTBOUND_MAIL_PAUSED || !editingInviteId || !["failed", "revoked"].includes(status);
   revokeInviteBtn.disabled = !editingInviteId || ["accepted", "revoked"].includes(status);
   deleteInviteBtn.disabled = !editingInviteId;
 
@@ -3389,6 +3395,10 @@ cancelMembershipBtn?.addEventListener("click", () => {
 });
 
 addInviteBtn?.addEventListener("click", () => {
+  if (OUTBOUND_MAIL_PAUSED) {
+    alert(OUTBOUND_MAIL_PAUSE_MESSAGE);
+    return;
+  }
   openInviteEditor(null);
 });
 
@@ -3497,6 +3507,10 @@ deleteMembershipBtn?.addEventListener("click", async () => {
 
 deleteMembershipUserBtn?.addEventListener("click", async () => {
   if (!editingMembershipId) return;
+  if (OUTBOUND_MAIL_PAUSED) {
+    alert("Worker-backed account deletion is paused with outbound mail. Delete only the organization access record for now, or re-enable the worker before deleting the Firebase user.");
+    return;
+  }
 
   const previousMembership = membershipMeta.find(item => item.id === editingMembershipId) || {};
   const targetLabel = normalizeString(previousMembership.email) || normalizeString(previousMembership.uid) || editingMembershipId;
@@ -3551,6 +3565,10 @@ saveInviteBtn?.addEventListener("click", async () => {
   }
   if (!payload.email) {
     alert("Invite email is required.");
+    return;
+  }
+  if (OUTBOUND_MAIL_PAUSED) {
+    alert(OUTBOUND_MAIL_PAUSE_MESSAGE);
     return;
   }
 
@@ -3639,6 +3657,10 @@ retryInviteBtn?.addEventListener("click", async () => {
   if (!editingInviteId) return;
   const invite = inviteMeta.find(item => item.id === editingInviteId);
   if (!invite) return;
+  if (OUTBOUND_MAIL_PAUSED) {
+    alert(OUTBOUND_MAIL_PAUSE_MESSAGE);
+    return;
+  }
 
   try {
     await updateDoc(doc(db, "editor_invites", editingInviteId), {
@@ -4093,7 +4115,9 @@ function buildReviewStatusGuidanceBlock(item) {
   const block = createEl("div", { className: "request-block" });
   block.appendChild(createEl("h4", { text: item.bucket === "attention" ? "Admin Attention" : "Next Steps" }));
 
-  const guidance = item.bucket === "attention"
+  const guidance = OUTBOUND_MAIL_PAUSED
+    ? "Outbound mail is paused until CRF rollout. No scheduled or manual review reminders will be sent while the pause is active."
+    : item.bucket === "attention"
     ? "This listing has gone at least one year without a fresh verification. Review the record, consider direct outreach, and decide whether it should remain published."
     : item.bucket === "current"
       ? "This listing is currently within its quarterly review window. You can still send a manual reminder now if you want to prompt the organization early."
@@ -4107,6 +4131,10 @@ function buildReviewStatusGuidanceBlock(item) {
 }
 
 async function sendManualReviewReminder() {
+  if (OUTBOUND_MAIL_PAUSED) {
+    alert(OUTBOUND_MAIL_PAUSE_MESSAGE);
+    return;
+  }
   if (!editingReviewStatusId) return;
   const item = reviewStatusMeta.find(entry => entry.id === editingReviewStatusId);
   if (!item?.resource) return;
@@ -4214,7 +4242,8 @@ function openReviewStatusEditor(item) {
   reviewStatusSummary.appendChild(buildReviewStatusMetaBlock(item));
   reviewStatusSummary.appendChild(buildReviewStatusGuidanceBlock(item));
   if (sendReviewReminderBtn) {
-    sendReviewReminderBtn.disabled = !getReviewReminderRecipients(item.resource.organizationId).length;
+    sendReviewReminderBtn.disabled = OUTBOUND_MAIL_PAUSED || !getReviewReminderRecipients(item.resource.organizationId).length;
+    sendReviewReminderBtn.title = OUTBOUND_MAIL_PAUSED ? OUTBOUND_MAIL_PAUSE_MESSAGE : "";
   }
   show(reviewStatusEditor);
 }
@@ -4537,7 +4566,8 @@ function openMailEditor(mailDoc) {
   }
 
   const status = normalizeMailStatus(mailDoc?.status);
-  retryMailBtn.disabled = status === "processing";
+  retryMailBtn.disabled = OUTBOUND_MAIL_PAUSED || status === "processing";
+  retryMailBtn.title = OUTBOUND_MAIL_PAUSED ? OUTBOUND_MAIL_PAUSE_MESSAGE : "";
   const requestDoc = getMailSourceRequest(mailDoc);
   const resourceDoc = getMailSourceResource(mailDoc);
   if (openMailRequestBtn) openMailRequestBtn.disabled = !requestDoc;
@@ -4593,6 +4623,10 @@ async function retryMailItem() {
   if (!editingMailId) return;
   const mailDoc = mailMeta.find(item => item.id === editingMailId);
   if (!mailDoc) return;
+  if (OUTBOUND_MAIL_PAUSED) {
+    alert(OUTBOUND_MAIL_PAUSE_MESSAGE);
+    return;
+  }
 
   try {
     await updateDoc(doc(db, "mail_queue", mailDoc.id), {
@@ -4833,7 +4867,24 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
   };
 
   const mailPayload = buildRequestStatusMailPayload(reviewedRequestDoc, nextStatus, reviewNotes);
-  if (mailPayload) {
+  if (mailPayload && OUTBOUND_MAIL_PAUSED) {
+    await logAuditEvent({
+      area: "mail",
+      action: "mail.suppressed",
+      entityType: "mail_queue",
+      entityId: "",
+      entityLabel: normalizeString(mailPayload.subject),
+      organizationId: normalizeString(reviewedRequestDoc.organizationId),
+      relatedRequestId: normalizeString(reviewedRequestDoc.id),
+      relatedResourceId: normalizeString(reviewedRequestDoc.resourceId),
+      summary: `Suppressed ${normalizeRequestStatus(nextStatus)} email for ${normalizeString(reviewedRequestDoc.resourceName) || reviewedRequestDoc.id} because outbound mail is paused`,
+      details: {
+        to: normalizeString(mailPayload.to),
+        type: normalizeString(mailPayload.type),
+        paused: true
+      }
+    });
+  } else if (mailPayload) {
     const mailRef = await addDoc(collection(db, "mail_queue"), {
       ...mailPayload,
       createdAt: serverTimestamp(),

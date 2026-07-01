@@ -891,6 +891,15 @@ A likely deployment setup is Firebase Hosting or another static host such as Git
 
 ### Outbound Mail Queue
 
+Current status, July 1, 2026: outbound mail is intentionally paused until CRF rollout.
+
+The pause has four layers:
+
+- the Windows Task Scheduler task should be disabled, not deleted
+- `tools/run_mail_worker.ps1` defaults to `-Paused $true`, so the scheduled wrapper exits without sending mail unless it is explicitly re-enabled
+- `tools/mail_worker.mjs` requires `CRF_MAIL_WORKER_ENABLED=1`, so direct `npm run mail-worker` calls also exit without processing unless explicitly enabled
+- `assets/js/admin.js` has `OUTBOUND_MAIL_PAUSED = true`, so the admin UI does not queue new outbound emails, manual review reminders, mail retries, or editor invites during the pause
+
 The admin review flow writes approval/rejection notifications into the `mail_queue` collection, and the quarterly review system writes secure confirmation tokens into `review_confirmations`.
 
 The intended sender for this repo is the local Outlook Desktop worker in `tools/mail_worker.mjs`. That worker:
@@ -911,6 +920,13 @@ Operational queue policy:
 - the background worker automatically deletes sent mail items older than roughly 6 months
 - the background worker automatically deletes old `review_confirmations` records older than roughly 1 year
 
+While outbound mail is paused:
+
+- do not manually retry failed mail
+- delete unwanted queued reminder emails from the Mail Queue panel instead of leaving them for later
+- avoid creating editor invites, because setup emails are worker-driven
+- approval/rejection decisions can still be recorded, but notification emails are suppressed and logged as `mail.suppressed`
+
 ### Outlook Mail Worker Setup
 
 The mail worker does not use SMTP credentials. It uses the currently configured Outlook Desktop profile on the Windows machine that runs it.
@@ -929,12 +945,16 @@ Optional environment variables:
   - if set, the worker tries to send through that Outlook account instead of whatever Outlook picks by default
 - `CRF_PUBLIC_BASE_URL`
   - if set, the worker rewrites any `localhost` or `127.0.0.1` links inside queued mail bodies to this hosted site base URL
+- `CRF_MAIL_WORKER_ENABLED`
+  - must be set to `1`, `true`, `yes`, or `on` before `tools/mail_worker.mjs` processes mail; the PowerShell wrapper sets this automatically only when it is run with `-Paused:$false`
+- `CRF_MAIL_WORKER_DISABLED`
+  - emergency kill switch; if set to `1`, `true`, `yes`, or `on`, it overrides `CRF_MAIL_WORKER_ENABLED` and exits without processing mail, invites, review confirmations, or auth-user actions
 
 Manual test:
 
 1. queue a test approval or rejection from `admin.html`
 2. in PowerShell, set `GOOGLE_APPLICATION_CREDENTIALS` to the Firebase service account JSON path
-3. optionally set:
+3. set `CRF_MAIL_WORKER_ENABLED` only when you intentionally want the worker to send/process mail, and optionally set:
    - `CRF_OUTLOOK_FROM_EMAIL`
    - `CRF_PUBLIC_BASE_URL`
 4. run:
@@ -947,6 +967,7 @@ Example PowerShell session:
 $env:GOOGLE_APPLICATION_CREDENTIALS="C:\path\to\firebase-service-account.json"
 $env:CRF_OUTLOOK_FROM_EMAIL="mwinterman@washoecounty.gov"
 $env:CRF_PUBLIC_BASE_URL="https://mitchwinterman.github.io/community-resource-finder"
+$env:CRF_MAIL_WORKER_ENABLED="1"
 npm.cmd run mail-worker
 ```
 
@@ -964,11 +985,37 @@ Add arguments:
 -NoProfile -ExecutionPolicy Bypass -File "C:\Users\mwinterman\Documents\GitHub\community-resource-finder\tools\run_mail_worker.ps1" -ServiceAccountPath "C:\Users\mwinterman\Documents\GitHub\CRF Extras\washoe-community-resources-firebase-adminsdk-fbsvc-fb80802fe8.json"
 ```
 
+The wrapper defaults to paused. With the arguments above, the task runs successfully but exits without sending anything.
+
+To run the worker when CRF outbound mail is re-enabled, add this argument:
+
+```text
+-Paused:$false
+```
+
 Recommended scheduler settings:
 
 - run every 1 hour
 - run only when the user is logged on
 - use a Windows account that has the correct Outlook profile configured
+
+### Pause or Re-enable Scheduled Mail
+
+To pause the scheduled task without deleting it:
+
+1. Open Windows Task Scheduler.
+2. Select Task Scheduler Library.
+3. Find the CRF mail worker task. If the name is unclear, open likely tasks and look for an action that runs `tools\run_mail_worker.ps1`.
+4. Right-click the task and choose Disable.
+5. Confirm the task still exists and its Status/State is Disabled.
+
+To re-enable outbound mail after rollout:
+
+1. In [assets/js/admin.js](/assets/js/admin.js), change `OUTBOUND_MAIL_PAUSED` to `false`.
+2. In Task Scheduler, edit the CRF mail worker task action and add `-Paused:$false` to the PowerShell arguments.
+3. Review `mail_queue`, `editor_invites`, and `review_confirmations` for stale test or pre-rollout records before the first run.
+4. Right-click the task and choose Enable.
+5. Right-click the task and choose Run once, then check the Mail Queue and Audit Logs panels.
 
 Operational notes:
 
