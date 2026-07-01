@@ -545,6 +545,22 @@ body {
   color: #64748b;
 }
 
+.mail-pause-banner {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #fed7aa;
+  border-left: 5px solid #f97316;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #7c2d12;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.mail-pause-banner strong {
+  color: #9a3412;
+}
+
 .embedded-list {
   width: 100%;
   max-height: 260px;

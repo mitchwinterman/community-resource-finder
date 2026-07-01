@@ -314,6 +314,10 @@
                 <h3>Review Status</h3>
                 <button id="refresh-review-status-btn" type="button">Refresh Review Status</button>
             </div>
+            <div class="mail-pause-banner" role="status">
+                <strong>Outbound mail paused.</strong>
+                Scheduled and manual review reminders are off until CRF rollout. Due counts remain visible for internal review only.
+            </div>
 
             <div class="request-toolbar">
                 <div class="request-filter-tabs" role="tablist" aria-label="Review status filters">
@@ -402,7 +406,10 @@
                 <h3>Mail Queue</h3>
                 <button id="refresh-mail-btn" type="button">Refresh Mail Queue</button>
             </div>
-            <p class="section-helper">Outbound mail is currently paused until CRF rollout. New emails, reminders, retries, and editor invites are blocked in the admin UI.</p>
+            <div class="mail-pause-banner" role="status">
+                <strong>Outbound mail paused.</strong>
+                New emails, reminders, retries, and editor invites are blocked in the admin UI until CRF rollout.
+            </div>
 
             <div class="request-toolbar">
                 <div class="request-filter-tabs" role="tablist" aria-label="Mail queue filters">
