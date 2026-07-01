@@ -10,13 +10,17 @@ The new smoke harness uses Playwright with mocked Firebase/CDN dependencies so f
 
 ## Test Matrix
 
-Configured projects:
+Default configured projects:
 
-- `chromium-desktop`: broad evergreen Chromium coverage
-- `firefox-desktop`: Gecko layout and form-control coverage
-- `webkit-desktop`: Safari-style layout/overflow coverage
-- `tablet-portrait`: tablet breakpoint coverage around the app's `900px` responsive switch
-- `mobile-safari`: narrow mobile viewport coverage
+- `chrome-desktop` when local Chrome is installed, otherwise `edge-desktop`
+- `edge-desktop` when both Chrome and Edge are installed
+- `tablet-chromium`: tablet breakpoint coverage around the app's `900px` responsive switch
+- `mobile-chromium`: narrow mobile viewport coverage
+
+Optional projects:
+
+- `firefox-desktop`: only included when `PLAYWRIGHT_INCLUDE_FIREFOX=1` and local Firefox is installed. This is opt-in because local Firefox currently fails before page load on some Windows setups.
+- WebKit/Safari automation is not currently configured.
 
 Core smoke coverage:
 
@@ -44,7 +48,7 @@ Install the test dependency and browsers first:
 
 ```powershell
 npm.cmd install
-npx playwright install chromium firefox webkit
+npx playwright install chromium
 ```
 
 Run the full smoke matrix:
@@ -57,6 +61,13 @@ Run interactively:
 
 ```powershell
 npm.cmd run smoke:test:headed
+```
+
+Run the optional local Firefox project:
+
+```powershell
+$env:PLAYWRIGHT_INCLUDE_FIREFOX = "1"
+npm.cmd run smoke:test -- --project=firefox-desktop
 ```
 
 ## Pre-Test Recommendations

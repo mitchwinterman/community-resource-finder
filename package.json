@@ -8,13 +8,17 @@
     "coordinate-backfill": "node tools/coordinate_backfill.mjs",
     "copy-org-contacts": "node tools/copy_resource_contacts_to_orgs.mjs",
     "migrate-resource-titles": "node tools/migrate_resource_titles.mjs",
+    "rules:test": "firebase emulators:exec --project demo-crf-rules-test --only firestore \"node --test tests/firestore/firestore-rules.test.mjs\"",
     "smoke:test": "playwright test",
     "smoke:test:headed": "playwright test --headed"
   },
   "devDependencies": {
-    "@playwright/test": "^1.53.0"
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "@playwright/test": "1.61.1",
+    "firebase": "^12.15.0",
+    "firebase-tools": "^15.22.4"
   },
   "dependencies": {
-    "firebase-admin": "^13.0.0"
+    "firebase-admin": "13.10.0"
   }
 }

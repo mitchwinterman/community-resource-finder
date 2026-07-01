@@ -11,6 +11,7 @@ const firefoxPath = "C:\\Program Files\\Mozilla Firefox\\firefox.exe";
 const hasChrome = fs.existsSync(chromePath);
 const hasEdge = fs.existsSync(edgePath);
 const hasFirefox = fs.existsSync(firefoxPath);
+const includeFirefox = process.env.PLAYWRIGHT_INCLUDE_FIREFOX === "1";
 
 const chromiumChannel = hasChrome ? "chrome" : hasEdge ? "msedge" : undefined;
 const chromiumProjects = chromiumChannel
@@ -57,7 +58,7 @@ const chromiumProjects = chromiumChannel
     ]
   : [];
 
-const firefoxProjects = hasFirefox
+const firefoxProjects = includeFirefox && hasFirefox
   ? [
       {
         name: "firefox-desktop",

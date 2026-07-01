@@ -1104,8 +1104,8 @@ Treat the data model as operationally useful but not yet normalized.
 That means:
 
 - editors can apply some formatting
-- the frontend currently renders stored HTML directly
-- content safety depends on trusted editors and proper sanitization strategy
+- stored rich text is sanitized before public rendering and editor previews
+- content safety depends on keeping that sanitization path in place as rich-text fields evolve
 
 ### Character Encoding
 
