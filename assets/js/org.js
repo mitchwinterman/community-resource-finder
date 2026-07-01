@@ -25,6 +25,11 @@ import {
   redirectToPortalForProfile,
   redirectToUnifiedLogin
 } from "./auth-routing.js";
+import {
+  ORG_EDITABLE_RESOURCE_FIELDS as orgEditableResourceFields,
+  isOrgResourceRequestType,
+  normalizeResourceRequestType
+} from "./request-contract.js";
 
 const loginScreen = document.getElementById("login-screen");
 const orgScreen = document.getElementById("org-screen");
@@ -70,30 +75,6 @@ const quillToolbarOptions = [
 const quillFormats = ["bold", "italic", "underline", "list", "link"];
 const richTextAllowedTags = ["a", "br", "em", "li", "ol", "p", "strong", "u", "ul"];
 const richTextAllowedAttrs = ["href"];
-const orgEditableResourceFields = [
-  "resourceTitle",
-  "Description",
-  "DescriptionDelta",
-  "Categories",
-  "Subcategories",
-  "Keywords",
-  "Websites",
-  "PhoneNumbers",
-  "Email",
-  "Address",
-  "City",
-  "Zip",
-  "Latitude",
-  "Longitude",
-  "IncludeInMap",
-  "Hours",
-  "Eligibility",
-  "Cost",
-  "Languages",
-  "Notes",
-  "NotesDelta"
-];
-
 function show(el) {
   el?.classList.remove("hidden");
 }
@@ -141,11 +122,7 @@ function normalizeRequestStatus(value) {
 }
 
 function normalizeRequestType(value) {
-  const requestType = normalizeString(value).toLowerCase();
-  if (requestType === "resource_create") return "resource_create";
-  if (requestType === "resource_delete") return "resource_delete";
-  if (requestType === "quarterly_confirmation") return "quarterly_confirmation";
-  return "resource_edit";
+  return normalizeResourceRequestType(value) || "resource_edit";
 }
 
 function getRequestTypeLabel(value) {
@@ -1101,6 +1078,46 @@ function closeResourceEditor() {
   editingResourceMode = "edit";
 }
 
+function getOwnedResourceById(resourceId) {
+  const normalizedResourceId = normalizeString(resourceId);
+  if (!normalizedResourceId) return null;
+  return resourceMeta.find(resource => normalizeString(resource.id) === normalizedResourceId) || null;
+}
+
+function validateOrgRequestBeforeSubmit(requestType, relatedResourceId) {
+  const normalizedRequestType = normalizeResourceRequestType(requestType);
+  const organizationId = normalizeString(membershipDoc?.organizationId);
+  const resourceId = normalizeString(relatedResourceId);
+
+  if (!isOrgResourceRequestType(normalizedRequestType)) {
+    throw new Error("Only resource create, edit, and delete requests can be submitted from the organization portal.");
+  }
+
+  if (!organizationId) {
+    throw new Error("Your account is not connected to an active organization.");
+  }
+
+  if (normalizedRequestType === "resource_create") {
+    if (resourceId) {
+      throw new Error("New resource requests cannot point at an existing live resource.");
+    }
+    return;
+  }
+
+  if (!resourceId) {
+    throw new Error("This request is missing the live resource it would change.");
+  }
+
+  const ownedResource = getOwnedResourceById(resourceId);
+  if (!ownedResource) {
+    throw new Error("This request cannot be submitted because the live resource is not owned by your organization.");
+  }
+
+  if (normalizeString(ownedResource.organizationId) !== organizationId) {
+    throw new Error("This request cannot be submitted because the live resource belongs to another organization.");
+  }
+}
+
 async function submitResourceRequest(requestType, proposedData, submitterNotes) {
   const actor = getCurrentActor();
   const normalizedRequestType = normalizeRequestType(requestType);
@@ -1110,6 +1127,8 @@ async function submitResourceRequest(requestType, proposedData, submitterNotes) 
   const resourceName = normalizedRequestType === "resource_delete"
     ? getResourceTitle(editingResource)
     : getResourceTitle(proposedData) || getResourceTitle(editingResource);
+
+  validateOrgRequestBeforeSubmit(normalizedRequestType, relatedResourceId);
 
   let requestId = normalizeString(editingPendingRequest?.id);
   let summary = "";
@@ -1263,7 +1282,7 @@ submitRequestBtn?.addEventListener("click", async () => {
     await submitResourceRequest(requestType, proposedData, submitterNotes);
   } catch (err) {
     console.error("Error submitting request:", err);
-    alert("Error submitting request. See console for details.");
+    alert(err instanceof Error ? err.message : "Error submitting request. See console for details.");
   }
 });
 
@@ -1283,7 +1302,7 @@ deleteResourceRequestBtn?.addEventListener("click", async () => {
     await submitResourceRequest("resource_delete", proposedData, submitterNotes);
   } catch (err) {
     console.error("Error submitting delete request:", err);
-    alert("Error submitting delete request. See console for details.");
+    alert(err instanceof Error ? err.message : "Error submitting delete request. See console for details.");
   }
 });
 

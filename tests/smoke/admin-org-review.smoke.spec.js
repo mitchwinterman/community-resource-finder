@@ -55,6 +55,63 @@ test("organization portal loads member-owned resources and request history", asy
   await issues.expectClean();
 });
 
+test("admin approval blocks requests targeting another organization's resource", async ({ page }) => {
+  await installOfflineRoutes(page, {
+    auth: {
+      currentUser: { uid: "admin-1", email: "admin@example.org" }
+    },
+    collections: {
+      resource_change_requests: {
+        "req-cross-org": {
+          organizationId: "org-1",
+          resourceId: "res-2",
+          resourceName: "Cross-Org Rename",
+          requestType: "resource_edit",
+          status: "pending",
+          submittedByUid: "member-1",
+          submittedByEmail: "editor@foodbank.example.org",
+          submitterNotes: "This should be blocked.",
+          reviewNotes: "",
+          proposedData: {
+            resourceTitle: "Unsafe Rename",
+            Description: "<p>Should not be applied.</p>",
+            Website: "",
+            Phone: ""
+          }
+        }
+      }
+    }
+  });
+  const issues = createRuntimeIssueCollector(page);
+  const dialogs = [];
+  page.on("dialog", async dialog => {
+    dialogs.push(dialog.message());
+    await dialog.accept();
+  });
+
+  await page.goto("/admin.html");
+  await expect(page.locator("#admin-screen")).toBeVisible();
+
+  await page.getByRole("button", { name: "Review Requests" }).click();
+  await expect(page.locator("#request-list")).toContainText("Cross-Org Rename");
+
+  await page.locator("#request-list .list-row", { hasText: "Cross-Org Rename" }).click();
+  await page.locator("#approve-request-btn").click();
+
+  await expect.poll(() => dialogs.join("\n")).toContain("Cannot approve");
+
+  const blockedState = await page.evaluate(() => ({
+    targetResourceTitle: window.__CRF_TEST_STATE__.collections.resources["res-2"].resourceTitle,
+    requestStatus: window.__CRF_TEST_STATE__.collections.resource_change_requests["req-cross-org"].status
+  }));
+
+  expect(blockedState.targetResourceTitle).toBe("Family Shelter Intake");
+  expect(blockedState.requestStatus).toBe("pending");
+
+  await expectNoHorizontalOverflow(page);
+  await issues.expectClean();
+});
+
 test("quarterly review page loads a tokenized listing and confirms it", async ({ page }) => {
   await installOfflineRoutes(page);
   const issues = createRuntimeIssueCollector(page);

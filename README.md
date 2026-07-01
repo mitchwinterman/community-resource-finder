@@ -323,6 +323,7 @@ Each document in `resource_change_requests` is expected to look roughly like thi
   "organizationId": "<organizations doc id>",
   "submittedByUid": "<firebase-auth-uid>",
   "submittedByEmail": "user@example.org",
+  "requestType": "resource_edit",
   "status": "pending",
   "proposedData": {
     "Description": "<p>Updated description</p>",
@@ -343,6 +344,11 @@ Notes:
 - org users create these docs from `org.html`
 - library admins review them in `admin.html`
 - approving a request copies `proposedData` into the live `resources` doc
+- org-submitted `requestType` values are limited to `resource_create`, `resource_edit`, and `resource_delete`
+- `quarterly_confirmation` requests are system-generated from confirmed review links, not submitted directly by org editors
+- `resource_edit` and `resource_delete` requests must point at an existing live resource whose `organizationId` matches the request `organizationId`
+- org-submitted `proposedData` is restricted to public editable resource fields; internal fields such as status, review metadata, ownership, and verification dates are not accepted from org users
+- admin approval re-validates the linked resource ownership before writing or deleting a live resource, and bulk approval blocks the whole batch if any selected request fails validation
 
 ### `review_confirmations` Collection
 

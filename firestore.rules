@@ -24,6 +24,111 @@ service cloud.firestore {
       return hasActiveMembership() && memberOrganizationId() == organizationId;
     }
 
+    function orgResourceRequestTypes() {
+      return ["resource_create", "resource_edit", "resource_delete"];
+    }
+
+    function requestTopLevelFields() {
+      return [
+        "resourceId",
+        "resourceName",
+        "organizationId",
+        "submittedByUid",
+        "submittedByEmail",
+        "requestType",
+        "status",
+        "proposedData",
+        "submitterNotes",
+        "reviewNotes",
+        "createdAt",
+        "updatedAt",
+        "cancelledAt"
+      ];
+    }
+
+    function requestRequiredFields() {
+      return [
+        "resourceId",
+        "resourceName",
+        "organizationId",
+        "submittedByUid",
+        "submittedByEmail",
+        "requestType",
+        "status",
+        "proposedData",
+        "submitterNotes",
+        "reviewNotes",
+        "createdAt",
+        "updatedAt"
+      ];
+    }
+
+    function orgProposedDataFields() {
+      return [
+        "resourceTitle",
+        "Description",
+        "DescriptionDelta",
+        "Categories",
+        "Subcategories",
+        "Keywords",
+        "Websites",
+        "PhoneNumbers",
+        "Email",
+        "Address",
+        "City",
+        "Zip",
+        "Latitude",
+        "Longitude",
+        "IncludeInMap",
+        "Hours",
+        "Eligibility",
+        "Cost",
+        "Languages",
+        "Notes",
+        "NotesDelta",
+        "Website",
+        "Phone"
+      ];
+    }
+
+    function proposedDataLegacyFieldsAreBlank(proposedData) {
+      return (!proposedData.keys().hasAny(["Website"]) || proposedData.Website == "")
+        && (!proposedData.keys().hasAny(["Phone"]) || proposedData.Phone == "");
+    }
+
+    function hasSafeOrgProposedData(data) {
+      return data.proposedData is map
+        && data.proposedData.keys().hasOnly(orgProposedDataFields())
+        && proposedDataLegacyFieldsAreBlank(data.proposedData);
+    }
+
+    function linkedResourceBelongsToMember(data) {
+      return data.resourceId is string
+        && data.resourceId != ""
+        && exists(/databases/$(database)/documents/resources/$(data.resourceId))
+        && get(/databases/$(database)/documents/resources/$(data.resourceId)).data.organizationId == memberOrganizationId();
+    }
+
+    function hasValidOrgRequestTarget(data) {
+      return (data.requestType == "resource_create" && data.resourceId == "")
+        || ((data.requestType == "resource_edit" || data.requestType == "resource_delete")
+          && linkedResourceBelongsToMember(data));
+    }
+
+    function hasValidOrgRequestShape(data) {
+      return data.keys().hasOnly(requestTopLevelFields())
+        && data.keys().hasAll(requestRequiredFields())
+        && data.organizationId == memberOrganizationId()
+        && data.submittedByUid == request.auth.uid
+        && data.submittedByEmail == request.auth.token.email
+        && data.requestType in orgResourceRequestTypes()
+        && data.status == "pending"
+        && data.reviewNotes == ""
+        && !data.keys().hasAny(["cancelledAt"])
+        && hasValidOrgRequestTarget(data)
+        && hasSafeOrgProposedData(data);
+    }
+
     function isPublishedResource() {
       return resource.data.status == "published";
     }
@@ -74,22 +179,24 @@ service cloud.firestore {
     match /resource_change_requests/{requestId} {
       allow read: if isAdmin() || (hasActiveMembership() && resource.data.organizationId == memberOrganizationId());
       allow create: if hasActiveMembership()
-        && request.resource.data.organizationId == memberOrganizationId()
-        && request.resource.data.submittedByUid == request.auth.uid
-        && request.resource.data.status == "pending";
+        && hasValidOrgRequestShape(request.resource.data);
       allow update: if isAdmin()
         || (hasActiveMembership()
           && resource.data.organizationId == memberOrganizationId()
           && resource.data.status == "pending"
+          && resource.data.requestType in orgResourceRequestTypes()
+          && request.resource.data.keys().hasOnly(requestTopLevelFields())
           && request.resource.data.organizationId == resource.data.organizationId
           && request.resource.data.submittedByUid == resource.data.submittedByUid
           && request.resource.data.submittedByEmail == resource.data.submittedByEmail
           && request.resource.data.requestType == resource.data.requestType
           && (
             (request.resource.data.status == "pending"
-              && request.resource.data.diff(resource.data).changedKeys().hasOnly(["resourceName", "proposedData", "submitterNotes", "updatedAt"]))
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["resourceName", "proposedData", "submitterNotes", "updatedAt"])
+              && hasValidOrgRequestTarget(request.resource.data)
+              && hasSafeOrgProposedData(request.resource.data))
             || (request.resource.data.status == "cancelled"
-              && request.resource.data.diff(resource.data).changedKeys().hasOnly(["status", "cancelledAt", "updatedAt"]))
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "cancelledAt", "updatedAt"]))
           ));
       allow delete: if isAdmin();
     }

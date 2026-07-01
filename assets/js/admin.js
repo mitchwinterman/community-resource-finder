@@ -8,6 +8,7 @@ import {
   collection,
   doc,
   getDocs,
+  getDoc,
   addDoc,
   setDoc,
   updateDoc,
@@ -38,6 +39,11 @@ import {
   redirectToPortalForProfile,
   redirectToUnifiedLogin
 } from "./auth-routing.js";
+import {
+  ORG_EDITABLE_RESOURCE_FIELDS as orgEditableResourceFields,
+  getDisallowedProposedDataKeys,
+  normalizeResourceRequestType
+} from "./request-contract.js";
 
 // ------------------------------------------------------
 // CONFIG
@@ -275,29 +281,6 @@ const richTextAllowedAttrs = ["href"];
 const REVIEW_REMINDER_DAYS = 90;
 const REVIEW_ADMIN_ATTENTION_DAYS = 365;
 const reviewRequestAccessMailto = "mailto:mwinterman@washoecounty.gov?subject=Community%20Resource%20Finder%20Editor%20Access%20Request";
-const orgEditableResourceFields = [
-  "resourceTitle",
-  "Description",
-  "DescriptionDelta",
-  "Categories",
-  "Subcategories",
-  "Keywords",
-  "Websites",
-  "PhoneNumbers",
-  "Email",
-  "Address",
-  "City",
-  "Zip",
-  "Latitude",
-  "Longitude",
-  "IncludeInMap",
-  "Hours",
-  "Eligibility",
-  "Cost",
-  "Languages",
-  "Notes",
-  "NotesDelta"
-];
 const requestReviewFieldConfig = [
   { field: "resourceTitle", label: "Resource Title" },
   { field: "Description", label: "Short Description", type: "richtext" },
@@ -613,11 +596,7 @@ function getRequestStatusLabel(value) {
 }
 
 function normalizeRequestType(value) {
-  const requestType = normalizeString(value).toLowerCase();
-  if (requestType === "resource_create") return "resource_create";
-  if (requestType === "resource_delete") return "resource_delete";
-  if (requestType === "quarterly_confirmation") return "quarterly_confirmation";
-  return "resource_edit";
+  return normalizeResourceRequestType(value) || "resource_edit";
 }
 
 function getRequestTypeLabel(value) {
@@ -4839,18 +4818,122 @@ closeRequestBtn?.addEventListener("click", () => {
   if (editRequestBtn) editRequestBtn.disabled = false;
 });
 
+function getNonBlankLegacyProposedDataKeys(proposedData) {
+  if (!proposedData || typeof proposedData !== "object" || Array.isArray(proposedData)) {
+    return [];
+  }
+
+  return ["Website", "Phone"].filter(field =>
+    Object.prototype.hasOwnProperty.call(proposedData, field) &&
+    normalizeString(proposedData[field]) !== ""
+  );
+}
+
+async function loadLiveResourceForApproval(resourceId) {
+  const normalizedResourceId = normalizeString(resourceId);
+  if (!normalizedResourceId) return null;
+
+  const resourceSnap = await getDoc(doc(db, "resources", normalizedResourceId));
+  if (!resourceSnap.exists()) return null;
+  return {
+    id: resourceSnap.id,
+    ...resourceSnap.data()
+  };
+}
+
+async function validateRequestForApproval(requestDoc, sourceProposedData = null) {
+  const errors = [];
+  const requestType = normalizeResourceRequestType(requestDoc?.requestType);
+  const requestId = normalizeString(requestDoc?.id);
+  const resourceId = normalizeString(requestDoc?.resourceId);
+  const organizationId = normalizeString(requestDoc?.organizationId);
+  const proposedData = sourceProposedData || requestDoc?.proposedData;
+
+  if (!requestType) {
+    errors.push(`unknown request type "${normalizeString(requestDoc?.requestType) || "(blank)"}"`);
+  }
+
+  if (!organizationId) {
+    errors.push("missing organization ownership");
+  }
+
+  if (!proposedData || typeof proposedData !== "object" || Array.isArray(proposedData)) {
+    errors.push("proposed data is missing or invalid");
+  } else {
+    const disallowedKeys = getDisallowedProposedDataKeys(proposedData, requestType || "resource_edit");
+    if (disallowedKeys.length) {
+      errors.push(`proposed data contains protected field(s): ${disallowedKeys.join(", ")}`);
+    }
+
+    const legacyKeys = getNonBlankLegacyProposedDataKeys(proposedData);
+    if (legacyKeys.length) {
+      errors.push(`legacy field(s) must stay blank: ${legacyKeys.join(", ")}`);
+    }
+  }
+
+  let liveResource = null;
+  if (requestType === "resource_create") {
+    if (resourceId) {
+      errors.push("new resource requests must not point at an existing live resource");
+    }
+  } else if (requestType === "resource_edit" || requestType === "resource_delete" || requestType === "quarterly_confirmation") {
+    if (!resourceId) {
+      errors.push("request is missing a live resource id");
+    } else {
+      liveResource = await loadLiveResourceForApproval(resourceId);
+      if (!liveResource) {
+        errors.push(`linked resource "${resourceId}" could not be found`);
+      } else if (normalizeString(liveResource.organizationId) !== organizationId) {
+        errors.push(`linked resource belongs to a different organization (${normalizeString(liveResource.organizationId) || "none"})`);
+      }
+    }
+  }
+
+  if (errors.length) {
+    const label = normalizeString(requestDoc?.resourceName) || requestId || "selected request";
+    throw new Error(`Cannot approve "${label}": ${errors.join("; ")}.`);
+  }
+
+  return {
+    requestType,
+    liveResource
+  };
+}
+
+async function validateBulkApprovalRequests(requests) {
+  const failures = [];
+  for (const requestDoc of requests) {
+    try {
+      await validateRequestForApproval(requestDoc, requestDoc?.proposedData);
+    } catch (err) {
+      failures.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return failures;
+}
+
+function isApprovalValidationError(err) {
+  return err instanceof Error && err.message.startsWith("Cannot approve");
+}
+
 async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overrideProposedData = null) {
   if (!requestDoc) return;
 
+  const normalizedNextStatus = normalizeRequestStatus(nextStatus);
   const actor = getCurrentActorMetadata();
-  const requestType = normalizeRequestType(requestDoc.requestType);
-  const effectiveProposedData = sanitizeRequestedResourceData(overrideProposedData || requestDoc.proposedData);
+  let requestType = normalizeResourceRequestType(requestDoc.requestType) || normalizeRequestType(requestDoc.requestType);
+  const sourceProposedData = overrideProposedData || requestDoc.proposedData;
+  if (normalizedNextStatus === "approved") {
+    const validation = await validateRequestForApproval(requestDoc, sourceProposedData);
+    requestType = validation.requestType;
+  }
+  const effectiveProposedData = sanitizeRequestedResourceData(sourceProposedData);
   const effectiveResourceName = requestType === "resource_delete"
     ? normalizeString(requestDoc.resourceName)
     : getResourceTitle(effectiveProposedData) || normalizeString(requestDoc.resourceName);
   let effectiveResourceId = normalizeString(requestDoc.resourceId);
 
-  if (nextStatus === "approved") {
+  if (normalizedNextStatus === "approved") {
     if (requestType === "resource_delete") {
       if (effectiveResourceId) {
         await deleteDoc(doc(db, "resources", effectiveResourceId));
@@ -4895,7 +4978,7 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
     resourceId: effectiveResourceId,
     resourceName: effectiveResourceName,
     requestType,
-    status: nextStatus,
+    status: normalizedNextStatus,
     reviewNotes,
     proposedData: effectiveProposedData,
     reviewedAt: serverTimestamp(),
@@ -4912,7 +4995,7 @@ async function applyReviewAction(requestDoc, nextStatus, reviewNotes, overridePr
     proposedData: effectiveProposedData
   };
 
-  const mailPayload = buildRequestStatusMailPayload(reviewedRequestDoc, nextStatus, reviewNotes);
+  const mailPayload = buildRequestStatusMailPayload(reviewedRequestDoc, normalizedNextStatus, reviewNotes);
   if (mailPayload && OUTBOUND_MAIL_PAUSED) {
     await logAuditEvent({
       area: "mail",
@@ -4994,8 +5077,12 @@ async function reviewRequest(nextStatus) {
     await loadReviewStatus({ preserveEditor: true });
     await loadAuditLogs();
   } catch (err) {
-    console.error("Error reviewing request:", err);
-    alert("Error updating change request. See console for details.");
+    if (isApprovalValidationError(err)) {
+      console.warn("Request approval blocked:", err.message);
+    } else {
+      console.error("Error reviewing request:", err);
+    }
+    alert(err instanceof Error ? err.message : "Error updating change request. See console for details.");
   }
 }
 
@@ -5042,6 +5129,19 @@ async function applyBulkRequestAction(action) {
   const actionLabel = action === "approved" ? "approve"
     : action === "rejected" ? "reject"
     : "delete";
+
+  if (action === "approved") {
+    const validationFailures = await validateBulkApprovalRequests(selectedRequests);
+    if (validationFailures.length) {
+      alert([
+        "Cannot approve the selected requests because at least one request failed validation:",
+        "",
+        ...validationFailures.map(message => `- ${message}`)
+      ].join("\n"));
+      return;
+    }
+  }
+
   if (!confirm(`${actionLabel[0].toUpperCase()}${actionLabel.slice(1)} ${selectedRequests.length} selected request(s)?`)) {
     return;
   }
@@ -5082,8 +5182,12 @@ async function applyBulkRequestAction(action) {
     await loadReviewStatus({ preserveEditor: true });
     await loadAuditLogs();
   } catch (err) {
-    console.error("Error applying bulk request action:", err);
-    alert("Error applying bulk request action. See console for details.");
+    if (isApprovalValidationError(err)) {
+      console.warn("Bulk request approval blocked:", err.message);
+    } else {
+      console.error("Error applying bulk request action:", err);
+    }
+    alert(err instanceof Error ? err.message : "Error applying bulk request action. See console for details.");
   }
 }
 

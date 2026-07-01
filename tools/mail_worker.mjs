@@ -13,6 +13,9 @@ import {
   getPhoneDisplayText,
   getWebsiteDisplayText
 } from "../assets/js/contact-fields.js";
+import {
+  SYSTEM_REVIEW_PROPOSED_DATA_FIELDS as reviewRequestEditableFields
+} from "../assets/js/request-contract.js";
 
 const DEFAULT_LIMIT = 25;
 const SENT_RETENTION_DAYS = 183;
@@ -49,31 +52,6 @@ const REVIEW_REMINDER_DAYS = 90;
 const FAILED_REVIEW_RETRY_HOURS = 24;
 const REVIEW_TOKEN_EXPIRATION_DAYS = 120;
 const requestAccessMailto = "mailto:mwinterman@washoecounty.gov?subject=Community%20Resource%20Finder%20Editor%20Access%20Request";
-const reviewRequestEditableFields = [
-  "resourceTitle",
-  "Description",
-  "DescriptionDelta",
-  "Categories",
-  "Subcategories",
-  "Keywords",
-  "Websites",
-  "PhoneNumbers",
-  "Email",
-  "Address",
-  "City",
-  "Zip",
-  "Latitude",
-  "Longitude",
-  "IncludeInMap",
-  "Hours",
-  "Eligibility",
-  "Cost",
-  "Languages",
-  "Last Verified",
-  "Notes",
-  "NotesDelta"
-];
-
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
